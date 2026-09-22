@@ -5,10 +5,14 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod config;
+pub mod cover;
 pub mod crypto;
 pub mod network;
+pub mod onion;
 pub mod relay;
 pub mod reliability;
+pub mod rendezvous;
 pub mod session;
 
 /// Wire version byte (`VER` field). v0.3 uses `0x03` (same envelope as 0.2).

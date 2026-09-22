@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License: MIT" /></a>
-  <a href="docs/SPECIFICATION.md"><img src="https://img.shields.io/badge/spec-v0.3--DRAFT-orange.svg" alt="Spec v0.3 DRAFT" /></a>
+  <a href="docs/SPECIFICATION.md"><img src="https://img.shields.io/badge/spec-v0.4--DRAFT-orange.svg" alt="Spec v0.4 DRAFT" /></a>
   <a href="#status"><img src="https://img.shields.io/badge/status-research%20prototype-lightgrey.svg" alt="Status" /></a>
   <a href="https://github.com/thefear078/PPoSE-Protocol/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/thefear078/PPoSE-Protocol/ci.yml?branch=main" alt="CI" /></a>
   <img src="https://img.shields.io/badge/lang-Rust-dea584.svg" alt="Rust" />
@@ -34,15 +34,15 @@ PPoSE is a **research prototype** with a running reference crate:
 
 | Axis | Inspiration | Status |
 |---|---|---|
-| Session crypto | [Noise Protocol](https://noiseprotocol.org/) XX | **Implemented** |
-| Datagram AEAD | ChaChaPoly via Noise transport (+ standalone XChaCha20-Poly1305 helper) | **Implemented** |
+| Session crypto | Noise XX + optional remote-static pin | **Implemented** |
+| Datagram AEAD | ChaChaPoly (Noise) + XChaCha20-Poly1305 hops | **Implemented** |
 | Reliability | Selective-repeat ARQ + fragmentation | **Implemented** |
 | Transport | UDP | **Implemented** |
-| 1-hop forwarder | Opaque IPv4 wrap + hash replay cache | **Implemented** (relay **sees dest IP**) |
-| Source routing | Sphinx / HORNET | **Not implemented** |
-| Discovery | Blind rendezvous | **Sketch only** |
-| Cover traffic | Mixnet-style padding | **Not implemented** |
-| Admission | Invitation Web-of-Trust | **Sketch only** — not cryptographic Sybil defense |
+| 1-hop forwarder | Cleartext dest wrap + replay cache | **Implemented** (sees dest IP) |
+| Nested hops | PND layered AEAD | **Implemented** — **not Sphinx**, hops see next IP |
+| Discovery | Token rendezvous | **Implemented** — collusion not solved |
+| Cover traffic | TYPE=Data random bodies | **Implemented** — unmeasured, not mixnet |
+| Admission | Invitation Web-of-Trust | **Sketch only** |
 
 If you need production anonymity, use battle-tested systems (Tor, I2P, Nym, SimpleX, …). This repo is for a testable design, not a Tor competitor.
 
@@ -117,10 +117,10 @@ No identity hashes in the clear. Byte workbook: [docs/PACKET.md](docs/PACKET.md)
 | **1** | Keys → Noise XX → UDP loopback | yes |
 | **2** | ARQ, ACK, fragment reassembly, loss test | yes |
 | **3** | IPv4 forwarder + replay window | yes (not anonymous) |
-| **4** | Sphinx/HORNET or a specified custom onion | no |
-| **5** | Rendezvous with correlation analysis | no |
-| **6** | Cover traffic + measurement harness | no |
-| **7** | External review when there is a network to audit | no |
+| **4** | Nested hops: specified PND (explicitly not Sphinx) | yes |
+| **5** | Token rendezvous (collusion documented, not solved) | yes |
+| **6** | Cover datagrams (unmeasured) | yes |
+| **7** | External review / mixnet / GPA evaluation | no |
 
 ---
 
