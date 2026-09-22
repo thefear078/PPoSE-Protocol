@@ -30,6 +30,10 @@ impl IdentitySecret {
         self.secret.to_bytes()
     }
 
+    /// DH with a peer public key (X25519).
+    pub fn shared_with(&self, peer: &PublicIdentity) -> [u8; 32] {
+        *self.secret.diffie_hellman(&peer.public).as_bytes()
+    }
     /// Corresponding public identity.
     pub fn public(&self) -> PublicIdentity {
         PublicIdentity {

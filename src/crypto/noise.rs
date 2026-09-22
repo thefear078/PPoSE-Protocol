@@ -28,6 +28,12 @@ pub enum NoiseError {
     /// Operation not valid in the current state.
     #[error("invalid session state")]
     BadState,
+    /// Key mismatch vs pinned remote static.
+    #[error("remote static key mismatch")]
+    KeyMismatch,
+    /// Remote static missing after handshake.
+    #[error("remote static not available")]
+    NoRemoteStatic,
 }
 
 /// Noise XX session (handshake then transport).
@@ -112,6 +118,27 @@ impl NoiseSession {
         ts.read_message(ciphertext, out)
             .map_err(|e| NoiseError::Crypto(format!("{e}")))
     }
+
+    /// Remote static public key after handshake (32 bytes).
+    pub fn remote_static(&self) -> Result<[u8; 32], NoiseError> {
+        let ts = self.transport.as_ref().ok_or(NoiseError::BadState)?;
+        let slice = ts.get_remote_static().ok_or(NoiseError::NoRemoteStatic)?;
+        if slice.len() != 32 {
+            return Err(NoiseError::NoRemoteStatic);
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(slice);
+        Ok(out)
+    }
+
+    /// Return error if remote static is not `expected`.
+    pub fn pin_remote(&self, expected: &[u8; 32]) -> Result<(), NoiseError> {
+        let got = self.remote_static()?;
+        if &got != expected {
+            return Err(NoiseError::KeyMismatch);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -149,5 +176,9 @@ mod tests {
         let n = alice.seal(msg, &mut buf_a).unwrap();
         let m = bob.open(&buf_a[..n], &mut buf_b).unwrap();
         assert_eq!(&buf_b[..m], msg);
+        assert_eq!(alice.remote_static().unwrap(), bob_id.public().as_bytes());
+        assert_eq!(bob.remote_static().unwrap(), alice_id.public().as_bytes());
+        alice.pin_remote(&bob_id.public().as_bytes()).unwrap();
+        assert!(alice.pin_remote(&[0u8; 32]).is_err());
     }
 }

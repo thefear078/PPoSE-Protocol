@@ -26,10 +26,10 @@ cargo run --example udp_chat
 
 | Priority | Area |
 |---|---|
-| High | Pin remote static key on Noise XX (demo is unauthenticated) |
-| High | Property tests for nonce / seq misuse |
-| Medium | Sphinx (cited) or drop onion language entirely |
-| Low | Rendezvous design docs (analysis before code) |
+| High | Measurement harness for cover (size/timing) |
+| High | Adopt Sphinx if onion must match literature |
+| Medium | Pin remote keys in the CLI demos |
+| Low | Formal correlation analysis of rendezvous |
 
 ## Pull request checklist
 

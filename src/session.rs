@@ -1,19 +1,23 @@
-//! High-level peer session: Noise XX + ARQ over UDP (direct or via a relay).
+//! High-level peer session: Noise XX + ARQ over UDP.
 
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use crate::crypto::keys::IdentitySecret;
+use rand_core::{OsRng, RngCore};
+
+use crate::cover::CoverMode;
+use crate::crypto::keys::{IdentitySecret, PublicIdentity};
 use crate::crypto::noise::{HandshakeRole, NoiseError, NoiseSession};
 use crate::network::forward::{decode_forward_body, encode_forward_body};
 use crate::network::packet::{decode_outer, encode_datagram, PacketError, PacketType};
 use crate::network::udp::recv_raw;
+use crate::onion::{wrap_route, OnionHop};
 use crate::reliability::{Arq, ArqError, ArqGiveUp};
 use crate::MAX_DATAGRAM;
 
 /// How packets reach the other endpoint.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Path {
     /// Send UDP directly to the peer.
     Direct {
@@ -27,6 +31,13 @@ pub enum Path {
         relay: SocketAddr,
         /// Other endpoint (IPv4).
         peer: SocketAddr,
+    },
+    /// Nested PND onion. Hops see next address after peel. Not Sphinx.
+    ViaOnion {
+        /// Outbound hops (first is UDP next-hop).
+        hops: Vec<OnionHop>,
+        /// Final destination.
+        dest: SocketAddr,
     },
 }
 
@@ -51,6 +62,8 @@ pub enum SessionError {
     HandshakeIncomplete,
     /// Timed out waiting for an application message.
     Timeout,
+    /// Empty onion hop list.
+    EmptyOnion,
 }
 
 impl From<io::Error> for SessionError {
@@ -95,6 +108,7 @@ impl std::fmt::Display for SessionError {
             Self::UnexpectedAddr => write!(f, "unexpected address"),
             Self::HandshakeIncomplete => write!(f, "handshake incomplete"),
             Self::Timeout => write!(f, "timeout"),
+            Self::EmptyOnion => write!(f, "onion path has no hops"),
         }
     }
 }
@@ -107,9 +121,12 @@ pub struct UdpSession {
     next_hop: SocketAddr,
     peer: SocketAddr,
     via_relay: bool,
+    onion: Option<Vec<OnionHop>>,
     noise: NoiseSession,
     arq: Arq,
     drop_data: u32,
+    cover: CoverMode,
+    last_cover: Instant,
 }
 
 impl UdpSession {
@@ -119,9 +136,23 @@ impl UdpSession {
         local: &IdentitySecret,
         path: Path,
     ) -> Result<Self, SessionError> {
-        let (next_hop, peer, via_relay) = match path {
-            Path::Direct { peer } => (peer, peer, false),
-            Path::ViaRelay { relay, peer } => (relay, peer, true),
+        Self::connect_initiator_pinned(sock, local, path, None)
+    }
+
+    /// Initiator that requires the remote static to match `expected`.
+    pub fn connect_initiator_pinned(
+        sock: UdpSocket,
+        local: &IdentitySecret,
+        path: Path,
+        expected: Option<PublicIdentity>,
+    ) -> Result<Self, SessionError> {
+        let (next_hop, peer, via_relay, onion) = match path {
+            Path::Direct { peer } => (peer, peer, false, None),
+            Path::ViaRelay { relay, peer } => (relay, peer, true, None),
+            Path::ViaOnion { hops, dest } => {
+                let first = hops.first().ok_or(SessionError::EmptyOnion)?;
+                (first.addr, dest, false, Some(hops))
+            }
         };
         let noise = NoiseSession::new(HandshakeRole::Initiator, local)?;
         let mut sess = Self {
@@ -129,9 +160,12 @@ impl UdpSession {
             next_hop,
             peer,
             via_relay,
+            onion,
             noise,
             arq: Arq::new(),
             drop_data: 0,
+            cover: CoverMode::Off,
+            last_cover: Instant::now(),
         };
 
         let mut buf = [0u8; MAX_DATAGRAM];
@@ -152,6 +186,9 @@ impl UdpSession {
         if !sess.noise.is_transport() {
             return Err(SessionError::HandshakeIncomplete);
         }
+        if let Some(exp) = expected {
+            sess.noise.pin_remote(&exp.as_bytes())?;
+        }
         Ok(sess)
     }
 
@@ -161,6 +198,36 @@ impl UdpSession {
         sock: UdpSocket,
         local: &IdentitySecret,
         expected_relay: Option<SocketAddr>,
+    ) -> Result<Self, SessionError> {
+        Self::accept_ex(sock, local, expected_relay, None, None)
+    }
+
+    /// Responder that pins the remote static key.
+    pub fn accept_responder_pinned(
+        sock: UdpSocket,
+        local: &IdentitySecret,
+        expected_relay: Option<SocketAddr>,
+        expected: Option<PublicIdentity>,
+    ) -> Result<Self, SessionError> {
+        Self::accept_ex(sock, local, expected_relay, expected, None)
+    }
+
+    /// Responder that onion-wraps all replies (including handshake).
+    pub fn accept_responder_onion(
+        sock: UdpSocket,
+        local: &IdentitySecret,
+        hops: Vec<OnionHop>,
+        dest: SocketAddr,
+    ) -> Result<Self, SessionError> {
+        Self::accept_ex(sock, local, None, None, Some((hops, dest)))
+    }
+
+    fn accept_ex(
+        sock: UdpSocket,
+        local: &IdentitySecret,
+        expected_relay: Option<SocketAddr>,
+        expected: Option<PublicIdentity>,
+        outbound_onion: Option<(Vec<OnionHop>, SocketAddr)>,
     ) -> Result<Self, SessionError> {
         let mut noise = NoiseSession::new(HandshakeRole::Responder, local)?;
         let (raw, from) = recv_raw(&sock)?;
@@ -187,10 +254,16 @@ impl UdpSession {
             next_hop: from,
             peer,
             via_relay,
+            onion: None,
             noise,
             arq: Arq::new(),
             drop_data: 0,
+            cover: CoverMode::Off,
+            last_cover: Instant::now(),
         };
+        if let Some((hops, dest)) = outbound_onion {
+            sess.set_outbound_onion(hops, dest)?;
+        }
 
         let mut buf = [0u8; MAX_DATAGRAM];
         let n = sess.noise.write_handshake(&[], &mut buf)?;
@@ -204,13 +277,33 @@ impl UdpSession {
         if !sess.noise.is_transport() {
             return Err(SessionError::HandshakeIncomplete);
         }
+        if let Some(exp) = expected {
+            sess.noise.pin_remote(&exp.as_bytes())?;
+        }
         Ok(sess)
     }
 
+    /// Set outbound onion route (return path after accept).
+    pub fn set_outbound_onion(
+        &mut self,
+        hops: Vec<OnionHop>,
+        dest: SocketAddr,
+    ) -> Result<(), SessionError> {
+        let first = hops.first().ok_or(SessionError::EmptyOnion)?;
+        self.next_hop = first.addr;
+        self.peer = dest;
+        self.onion = Some(hops);
+        self.via_relay = false;
+        Ok(())
+    }
+
+    /// Enable cover datagrams on idle.
+    pub fn set_cover(&mut self, mode: CoverMode) {
+        self.cover = mode;
+        self.last_cover = Instant::now();
+    }
+
     /// Queue and send an application message (fragmented + ARQ).
-    ///
-    /// Blocks until the send window for this message is acknowledged or
-    /// `timeout` is used via the default 5s wait so retransmits can run.
     pub fn send(&mut self, plaintext: &[u8]) -> Result<(), SessionError> {
         self.send_timeout(plaintext, Duration::from_secs(5))
     }
@@ -233,6 +326,7 @@ impl UdpSession {
                 return Ok(m);
             }
             self.flush()?;
+            self.maybe_cover()?;
             let now = Instant::now();
             if now >= deadline {
                 return Err(SessionError::Timeout);
@@ -258,7 +352,6 @@ impl UdpSession {
     }
 
     /// Drop the next `n` outbound encrypted DATA datagrams (loss tests).
-    /// Handshake packets are never dropped this way. ARQ still marks them sent.
     pub fn debug_drop_data(&mut self, n: u32) {
         self.drop_data = n;
     }
@@ -273,10 +366,16 @@ impl UdpSession {
         self.peer
     }
 
+    /// Remote static after handshake.
+    pub fn remote_static(&self) -> Result<[u8; 32], SessionError> {
+        Ok(self.noise.remote_static()?)
+    }
+
     fn wait_acked(&mut self, timeout: Duration) -> Result<(), SessionError> {
         let deadline = Instant::now() + timeout;
         loop {
             self.flush()?;
+            self.maybe_cover()?;
             if self.arq.unacked_len() == 0 {
                 return Ok(());
             }
@@ -303,6 +402,21 @@ impl UdpSession {
                 }
             }
         }
+    }
+
+    fn maybe_cover(&mut self) -> Result<(), SessionError> {
+        let Some(interval) = self.cover.interval() else {
+            return Ok(());
+        };
+        let now = Instant::now();
+        if now.saturating_duration_since(self.last_cover) < interval {
+            return Ok(());
+        }
+        self.last_cover = now;
+        let n = self.cover.payload_len();
+        let mut body = vec![0u8; n];
+        OsRng.fill_bytes(&mut body);
+        self.send_inner(PacketType::Data, &body)
     }
 
     fn flush(&mut self) -> Result<(), SessionError> {
@@ -336,7 +450,10 @@ impl UdpSession {
         match ty {
             PacketType::Data => {
                 let mut out = vec![0u8; body.len()];
-                let n = self.noise.open(&body, &mut out)?;
+                let n = match self.noise.open(&body, &mut out) {
+                    Ok(n) => n,
+                    Err(_) => return Ok(()),
+                };
                 out.truncate(n);
                 if let Some(ack) = self.arq.ingest(&out)? {
                     let mut buf = [0u8; MAX_DATAGRAM];
@@ -345,15 +462,19 @@ impl UdpSession {
                 }
                 Ok(())
             }
-            PacketType::Handshake | PacketType::Ack | PacketType::Forward => {
-                Err(SessionError::UnexpectedType)
-            }
+            PacketType::Handshake
+            | PacketType::Ack
+            | PacketType::Forward
+            | PacketType::Onion
+            | PacketType::Rendezvous => Err(SessionError::UnexpectedType),
         }
     }
 
     fn send_inner(&self, ty: PacketType, body: &[u8]) -> Result<(), SessionError> {
         let inner_dg = encode_datagram(ty, body)?;
-        let wire = if self.via_relay {
+        let wire = if let Some(hops) = &self.onion {
+            wrap_route(hops, self.peer, &inner_dg)?
+        } else if self.via_relay {
             let fb = encode_forward_body(self.peer, &inner_dg)?;
             encode_datagram(PacketType::Forward, &fb)?
         } else {

@@ -14,6 +14,10 @@ pub enum PacketType {
     Ack = 3,
     /// Cleartext IPv4 forward wrapper. Relay sees destination. Not onion routing.
     Forward = 4,
+    /// Nested AEAD hop (PND). Not Sphinx.
+    Onion = 5,
+    /// Rendezvous register / lookup.
+    Rendezvous = 6,
 }
 
 impl PacketType {
@@ -24,6 +28,8 @@ impl PacketType {
             2 => Some(Self::Data),
             3 => Some(Self::Ack),
             4 => Some(Self::Forward),
+            5 => Some(Self::Onion),
+            6 => Some(Self::Rendezvous),
             _ => None,
         }
     }

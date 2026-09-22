@@ -1,4 +1,4 @@
-# Threat Model (v0.3-DRAFT)
+# Threat Model (v0.4-DRAFT)
 
 **Status:** living document. If README and this file disagree, this file wins for security claims.
 
@@ -19,7 +19,8 @@
 |---|---|---|
 | **Eavesdropper on a single UDP path** | Sees datagrams Alice↔Bob on loopback/LAN test | Cannot read Data payloads after successful Noise XX + AEAD |
 | **Active MITM on first contact** | Can drop/modify handshake bytes | Detected if Noise XX authentication fails (static keys known/out-of-band) |
-| **Malicious relay** | Sees dest IP:port, can drop/delay/log sizes | **No anonymity claim.** Replay cache only reduces duplicate flooding. |
+| **Malicious relay / onion hop** | Sees next IP after peel; can drop/delay | **No anonymity vs the hop.** Payload of inner layers stays sealed until last hop. |
+| **Colluding rendezvous servers** | Share tokens, IPs, timing | **No claim** — documented limitation |
 | **Global passive adversary (GPA)** | Observes all links, timing, sizes | **No claim** |
 | **Sybil operator** | Spins many identities | Invitation WoT sketch is **not** a cryptographic defense |
 

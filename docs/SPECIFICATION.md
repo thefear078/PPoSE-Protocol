@@ -1,6 +1,6 @@
 # PPoSE Protocol Specification
 
-## Version 0.3-DRAFT
+## Version 0.4-DRAFT
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -21,14 +21,13 @@
 
 PPoSE explores encrypted peer-to-peer datagrams with an optional future onion-forwarding layer.
 
-| In scope for v0.3 code | Out of scope (DRAFT text only) |
+| In scope for v0.4 code | Out of scope |
 |---|---|
-| X25519 identity + Noise XX | Multi-hop anonymity vs GPA |
-| Inner DATA/ACK + selective-repeat ARQ | Blind rendezvous production design |
-| Fragmentation (1024 B payload units) | Cover-traffic schedules |
-| 8-byte cleartext outer header | Sybil-hard admission |
-| IPv4 forwarder + hash replay cache | Onion routing / Sphinx |
-| Direct + relayed UDP integration tests | Bug bounty / audits |
+| X25519 + Noise XX + remote pin | GPA / mixnet |
+| ARQ + fragments | Sphinx (we implemented PND instead) |
+| IPv4 forwarder + PND onion hops | Blind RS independence proofs |
+| Token rendezvous | Sybil-hard admission |
+| Cover datagrams (unmeasured) | Bug bounty / audit |
 
 ---
 
