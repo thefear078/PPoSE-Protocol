@@ -1,9 +1,9 @@
-//! Example relay node stub — Phase 2 will wire UDP + routing.
+//! Relay node is not implemented yet (no multi-hop in Phase 1).
 
 fn main() {
-    println!(
-        "PPoSE relay_node scaffold — max hops {}",
-        ppose::DEFAULT_MAX_HOPS
+    eprintln!(
+        "PPoSE {} — relay_node is out of scope until Phase 3+",
+        ppose::CRATE_VERSION
     );
-    println!("internal MTU {}", ppose::INTERNAL_MTU);
+    std::process::exit(1);
 }

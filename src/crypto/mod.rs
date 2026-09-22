@@ -1,9 +1,9 @@
-//! Cryptographic primitives (Layer 5).
-//!
-//! Mandatory algorithms: Ed25519, X25519, XChaCha20-Poly1305, BLAKE3, HKDF-SHA256, Noise XX.
+//! Cryptographic primitives: keys, Noise XX, optional standalone AEAD helpers.
 
-pub mod blake3_hash;
+pub mod aead;
 pub mod keys;
+pub mod noise;
 
-pub use blake3_hash::identity_hash;
-pub use keys::IdentityKeyPair;
+pub use aead::{AeadError, SessionAead};
+pub use keys::{IdentitySecret, PublicIdentity};
+pub use noise::{HandshakeRole, NoiseError, NoiseSession};

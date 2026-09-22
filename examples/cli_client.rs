@@ -1,6 +1,8 @@
-//! Example CLI client stub — Phase 2 will wire real messaging.
+//! Placeholder CLI — use `udp_chat` for the Phase 1 demo.
 
 fn main() {
-    println!("PPoSE cli_client scaffold — see docs/SPECIFICATION.md");
-    println!("version {}", ppose::CRATE_VERSION);
+    println!(
+        "PPoSE {} — run: cargo run --example udp_chat",
+        ppose::CRATE_VERSION
+    );
 }
