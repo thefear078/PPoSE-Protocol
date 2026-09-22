@@ -1,6 +1,6 @@
 # PPoSE Protocol Specification
 
-## Version 0.2-DRAFT
+## Version 0.3-DRAFT
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -21,13 +21,14 @@
 
 PPoSE explores encrypted peer-to-peer datagrams with an optional future onion-forwarding layer.
 
-| In scope for v0.2 code | Out of scope (DRAFT text only) |
+| In scope for v0.3 code | Out of scope (DRAFT text only) |
 |---|---|
-| Identity keys (Ed25519 / X25519) | Multi-hop anonymity vs GPA |
-| Noise XX session setup | Blind rendezvous production design |
-| Session AEAD datagrams | Cover-traffic schedules |
+| X25519 identity + Noise XX | Multi-hop anonymity vs GPA |
+| Inner DATA/ACK + selective-repeat ARQ | Blind rendezvous production design |
+| Fragmentation (1024 B payload units) | Cover-traffic schedules |
 | 8-byte cleartext outer header | Sybil-hard admission |
-| UDP loopback integration tests | Bug bounty / audits |
+| IPv4 forwarder + hash replay cache | Onion routing / Sphinx |
+| Direct + relayed UDP integration tests | Bug bounty / audits |
 
 ---
 
@@ -35,10 +36,11 @@ PPoSE explores encrypted peer-to-peer datagrams with an optional future onion-fo
 
 ```
 Implemented now:
-  App  →  Session (Noise XX + AEAD)  →  Outer header  →  UDP
+  App → ARQ/fragments → Noise XX transport → Outer header → UDP
+                 ↘ optional TYPE=Forward IPv4 wrap (relay sees dest)
 
-Planned later:
-  App → RDG → Session → Onion (cite Sphinx) → Obfuscation → Transport
+Not implemented:
+  Sphinx/HORNET onion  ·  rendezvous  ·  cover traffic
 ```
 
 ### 2.1 “Stateless” clarified (NORMATIVE intent)
@@ -143,9 +145,28 @@ Placeholder per-hop sizes from older drafts that did not sum to the advertised 4
 
 ---
 
-## 5. Reliability (DRAFT)
+## 5. Reliability (NORMATIVE in reference crate)
 
-Selective-repeat ARQ, fragmentation, and reorder buffers are **endpoint** responsibilities. Not implemented in Phase 1 beyond optional `seq` in plaintext.
+Selective-repeat ARQ and fragmentation run **only on endpoints**.
+
+| Parameter | Value |
+|---|---|
+| Window | 32 packets |
+| ACK | inner kind 0x02 after each accepted DATA |
+| Retransmit | 200 ms, 5 attempts then give up |
+| Fragment payload | ≤ 1024 bytes; `frag_total` ≤ 255 |
+
+Inner layouts: [PACKET.md](PACKET.md).
+
+### 5.1 IPv4 forwarder (implemented, not anonymous)
+
+TYPE=Forward carries dest IPv4:port in the clear. The relay:
+
+- does not decrypt
+- rewrites the dest field to the sender for the return path
+- drops inner datagrams whose BLAKE3-16 hash was seen inside the TTL window
+
+This is a **proxy**, not Sphinx.
 
 ---
 
@@ -191,21 +212,25 @@ Constant-rate / stealth modes are unimplemented. Any battery percentage in older
 
 ---
 
-## 10. Testing requirements (Phase 1)
+## 10. Testing requirements
 
 | Test | Required |
 |---|---|
 | Identity key round-trip | yes |
 | Noise XX handshake Alice↔Bob | yes |
-| AEAD seal/open + nonce reuse detection | yes |
-| UDP loopback echo with handshake + data | yes |
+| AEAD seal/open + AAD mismatch | yes |
+| UDP loopback + ARQ | yes |
+| Loss recovery (drop one DATA) | yes |
+| Fragment reassembly (~2 kB) | yes |
+| Path via IPv4 forwarder | yes |
 | Outer header rejects wrong magic/version | yes |
+| Replay cache rejects duplicates | yes |
 
 ---
 
 ## 11. Roadmap
 
-See README. Spec versions: `0.2-DRAFT` (this) → `0.3` when reliability lands → `1.0` only after interop vectors + external review.
+See README. Spec versions: `0.3-DRAFT` (this) → `1.0` only after interop vectors + external review.
 
 ---
 

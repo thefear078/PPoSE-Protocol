@@ -1,9 +1,16 @@
-//! Relay node is not implemented yet (no multi-hop in Phase 1).
+//! IPv4 UDP forwarder with a bounded replay cache.
+//!
+//! This is not onion routing. The relay sees destination addresses.
+
+use std::env;
+
+use ppose::relay::Relay;
 
 fn main() {
-    eprintln!(
-        "PPoSE {} — relay_node is out of scope until Phase 3+",
-        ppose::CRATE_VERSION
-    );
-    std::process::exit(1);
+    let bind = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:0".into());
+    let mut r = Relay::bind(&bind).expect("bind");
+    println!("relay {}", r.local_addr().unwrap());
+    loop {
+        let _ = r.step();
+    }
 }

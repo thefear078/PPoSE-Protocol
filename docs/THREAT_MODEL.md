@@ -1,4 +1,4 @@
-# Threat Model (v0.2-DRAFT)
+# Threat Model (v0.3-DRAFT)
 
 **Status:** living document. If README and this file disagree, this file wins for security claims.
 
@@ -19,8 +19,8 @@
 |---|---|---|
 | **Eavesdropper on a single UDP path** | Sees datagrams Alice↔Bob on loopback/LAN test | Cannot read Data payloads after successful Noise XX + AEAD |
 | **Active MITM on first contact** | Can drop/modify handshake bytes | Detected if Noise XX authentication fails (static keys known/out-of-band) |
-| **Malicious relay** | N/A — no multi-hop relay in code yet | **No claim** |
-| **Global passive adversary (GPA)** | Observes all links, timing, sizes | **No claim** — 0–1 hop prototype cannot provide this |
+| **Malicious relay** | Sees dest IP:port, can drop/delay/log sizes | **No anonymity claim.** Replay cache only reduces duplicate flooding. |
+| **Global passive adversary (GPA)** | Observes all links, timing, sizes | **No claim** |
 | **Sybil operator** | Spins many identities | Invitation WoT sketch is **not** a cryptographic defense |
 
 This is **not** a UC / game-based proof. It is an engineering threat sketch so implementers know what *not* to advertise.
@@ -33,11 +33,12 @@ This is **not** a UC / game-based proof. It is an engineering threat sketch so i
 4. **3 hops defeat GPA** — Tor does not claim this with larger hop counts and a real network; we do not either.
 5. **Reputation formulas stop Sybils** — `score = age*10 + …` can be farmed; treat as soft policy, not crypto.
 
-## 4. Trust assumptions (Phase 1)
+## 4. Trust assumptions (v0.3)
 
-- Peers obtain each other's **static public keys out of band** (test vectors, manual exchange). There is no PKI in-tree.
+- Demo CLI generates **ephemeral** keys per process; there is no PKI.
+- Noise XX authenticates static keys **if** they were exchanged out of band. The demo does **not** pin the peer static key (PSK/remote known-key) yet — a MITM who intercepts the first handshake can impersonate. Treat demo sessions as **unauthenticated until remote static is set**.
 - OS UDP stack and local machine are trusted for loopback tests.
-- `snow` / `x25519-dalek` / `chacha20poly1305` / `ed25519-dalek` / `blake3` behave as documented.
+- `snow` / `x25519-dalek` / `chacha20poly1305` / `blake3` behave as documented.
 
 ## 5. Metadata that still leaks (Phase 1)
 

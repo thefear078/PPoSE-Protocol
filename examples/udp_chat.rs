@@ -1,10 +1,11 @@
-//! Tiny loopback demo: initiator talks to an ephemeral responder thread.
+//! Tiny loopback demo.
 
 use std::thread;
+use std::time::Duration;
 
 use ppose::crypto::keys::IdentitySecret;
 use ppose::network::udp::bind_loopback;
-use ppose::session::UdpSession;
+use ppose::session::{Path, UdpSession};
 use ppose::CRATE_VERSION;
 
 fn main() {
@@ -17,16 +18,18 @@ fn main() {
     let alice_id = IdentitySecret::generate();
 
     let bob = thread::spawn(move || {
-        let mut s = UdpSession::accept_responder(bob_sock, &bob_id).expect("hs");
-        let msg = s.recv().expect("recv");
+        let mut s = UdpSession::accept_responder(bob_sock, &bob_id, None).expect("hs");
+        let msg = s.recv(Duration::from_secs(2)).expect("recv");
         println!("bob got: {}", String::from_utf8_lossy(&msg));
         s.send(b"ack").expect("send");
     });
 
-    let mut alice = UdpSession::connect_initiator(alice_sock, bob_addr, &alice_id).expect("hs");
+    let mut alice =
+        UdpSession::connect_initiator(alice_sock, &alice_id, Path::Direct { peer: bob_addr })
+            .expect("hs");
     println!("alice fp {}…", hex_prefix(&alice_id.public().fingerprint()));
     alice.send(b"ping").expect("send");
-    let reply = alice.recv().expect("recv");
+    let reply = alice.recv(Duration::from_secs(2)).expect("recv");
     println!("alice got: {}", String::from_utf8_lossy(&reply));
     bob.join().expect("bob");
 }
