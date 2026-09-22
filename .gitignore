@@ -1,0 +1,22 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets / local env
+.env
+.env.*
+*.pem
+*.key
+!assets/**
+
+# Coverage / fuzz artifacts
+coverage/
+fuzz/artifacts/
+*.profraw

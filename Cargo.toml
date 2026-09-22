@@ -1,0 +1,43 @@
+[package]
+name = "ppose"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["The Fear <https://github.com/thefear078>"]
+description = "Peer-to-Peer Obfuscated Stateless Exchange (PPoSE) — reference implementation"
+license = "MIT"
+repository = "https://github.com/thefear078/PPoSE-Protocol"
+homepage = "https://github.com/thefear078/PPoSE-Protocol"
+documentation = "https://github.com/thefear078/PPoSE-Protocol/blob/main/docs/SPECIFICATION.md"
+readme = "README.md"
+keywords = ["p2p", "privacy", "anonymity", "noise", "udp"]
+categories = ["network-programming", "cryptography"]
+
+[dependencies]
+blake3 = "1"
+
+# Planned Phase 1–2 dependencies (uncomment as modules land):
+# tokio = { version = "1", features = ["full"] }
+# serde = { version = "1", features = ["derive"] }
+# thiserror = "1"
+# tracing = "0.1"
+# chacha20poly1305 = "0.10"
+# x25519-dalek = "2"
+# ed25519-dalek = "2"
+# snow = "0.9"
+
+[lib]
+name = "ppose"
+path = "src/lib.rs"
+
+[[example]]
+name = "cli_client"
+path = "examples/cli_client.rs"
+
+[[example]]
+name = "relay_node"
+path = "examples/relay_node.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
