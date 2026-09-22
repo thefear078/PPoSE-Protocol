@@ -26,9 +26,9 @@ cargo run --example udp_chat
 
 | Priority | Area |
 |---|---|
-| High | Lossy UDP + ACK/retransmit (Phase 2) |
-| High | Property tests for nonce/seq misuse |
-| Medium | Single forwarder + bounded replay window |
+| High | Pin remote static key on Noise XX (demo is unauthenticated) |
+| High | Property tests for nonce / seq misuse |
+| Medium | Sphinx (cited) or drop onion language entirely |
 | Low | Rendezvous design docs (analysis before code) |
 
 ## Pull request checklist

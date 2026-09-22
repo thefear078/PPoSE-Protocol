@@ -7,9 +7,11 @@
 
 pub mod crypto;
 pub mod network;
+pub mod relay;
+pub mod reliability;
 pub mod session;
 
-/// Wire version byte (`VER` field). v0.2 uses `0x03`.
+/// Wire version byte (`VER` field). v0.3 uses `0x03` (same envelope as 0.2).
 pub const PROTOCOL_VERSION: u8 = 0x03;
 
 /// Magic bytes identifying PPoSE datagrams.
@@ -18,7 +20,7 @@ pub const MAGIC: [u8; 2] = [0x4A, 0x7F];
 /// Cleartext outer header length (bytes).
 pub const OUTER_HEADER_LEN: usize = 8;
 
-/// Soft maximum UDP datagram size for Phase 1.
+/// Soft maximum UDP datagram size.
 pub const MAX_DATAGRAM: usize = 1200;
 
 /// Crate version string.

@@ -1,6 +1,6 @@
 //! Cleartext outer header encode/decode (8 bytes).
 
-use crate::{MAGIC, OUTER_HEADER_LEN, PROTOCOL_VERSION};
+use crate::{MAGIC, MAX_DATAGRAM, OUTER_HEADER_LEN, PROTOCOL_VERSION};
 
 /// Packet type discriminator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8,10 +8,12 @@ use crate::{MAGIC, OUTER_HEADER_LEN, PROTOCOL_VERSION};
 pub enum PacketType {
     /// Noise handshake message.
     Handshake = 1,
-    /// Encrypted application data (Noise transport).
+    /// Encrypted application / ACK (Noise transport).
     Data = 2,
-    /// Acknowledgement (reserved for Phase 2).
+    /// Unused (inner ACK rides in Data). Kept for decode completeness.
     Ack = 3,
+    /// Cleartext IPv4 forward wrapper. Relay sees destination. Not onion routing.
+    Forward = 4,
 }
 
 impl PacketType {
@@ -21,6 +23,7 @@ impl PacketType {
             1 => Some(Self::Handshake),
             2 => Some(Self::Data),
             3 => Some(Self::Ack),
+            4 => Some(Self::Forward),
             _ => None,
         }
     }
@@ -34,8 +37,18 @@ pub fn encode_outer(ty: PacketType, flags: u8) -> [u8; OUTER_HEADER_LEN] {
     out[2] = PROTOCOL_VERSION;
     out[3] = ty as u8;
     out[4] = flags;
-    // out[5..8] reserved zero
     out
+}
+
+/// Full datagram: outer header + body.
+pub fn encode_datagram(ty: PacketType, body: &[u8]) -> Result<Vec<u8>, PacketError> {
+    if OUTER_HEADER_LEN + body.len() > MAX_DATAGRAM {
+        return Err(PacketError::TooLarge);
+    }
+    let mut pkt = Vec::with_capacity(OUTER_HEADER_LEN + body.len());
+    pkt.extend_from_slice(&encode_outer(ty, 0));
+    pkt.extend_from_slice(body);
+    Ok(pkt)
 }
 
 /// Decode and validate outer header. Returns `(type, flags, body)`.
@@ -65,7 +78,26 @@ pub enum PacketError {
     BadVersion,
     /// Unknown TYPE.
     BadType,
+    /// Exceeds MAX_DATAGRAM.
+    TooLarge,
+    /// Non-IPv4 address in a forward wrapper.
+    BadAddress,
 }
+
+impl std::fmt::Display for PacketError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Truncated => write!(f, "truncated packet"),
+            Self::BadMagic => write!(f, "bad magic"),
+            Self::BadVersion => write!(f, "bad version"),
+            Self::BadType => write!(f, "bad type"),
+            Self::TooLarge => write!(f, "datagram too large"),
+            Self::BadAddress => write!(f, "non-ipv4 address"),
+        }
+    }
+}
+
+impl std::error::Error for PacketError {}
 
 #[cfg(test)]
 mod tests {
@@ -86,5 +118,11 @@ mod tests {
         let mut hdr = encode_outer(PacketType::Handshake, 0);
         hdr[0] ^= 0xff;
         assert_eq!(decode_outer(&hdr), Err(PacketError::BadMagic));
+    }
+
+    #[test]
+    fn forward_type_roundtrip() {
+        assert_eq!(PacketType::from_u8(4), Some(PacketType::Forward));
+        assert_eq!(PacketType::from_u8(0), None);
     }
 }
