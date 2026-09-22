@@ -6,204 +6,160 @@
 
 <p align="center">
   <strong>Peer-to-Peer Obfuscated Stateless Exchange</strong><br />
-  Decentralized anonymous P2P communication with zero-metadata leakage.
+  Experimental design for encrypted P2P datagrams — <em>not</em> a finished anonymity network.
 </p>
 
 <p align="center">
-  <a href="https://github.com/thefear078/PPoSE-Protocol/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License: MIT" /></a>
-  <a href="docs/SPECIFICATION.md"><img src="https://img.shields.io/badge/spec-v1.2--FINAL-black.svg" alt="Spec v1.2" /></a>
-  <a href="docs/SPECIFICATION.md"><img src="https://img.shields.io/badge/security-APT--grade-brightgreen.svg" alt="APT-grade privacy" /></a>
-  <a href="#status"><img src="https://img.shields.io/badge/status-spec%20ready-orange.svg" alt="Status" /></a>
-  <a href="https://github.com/thefear078/PPoSE-Protocol"><img src="https://img.shields.io/badge/lang-Rust%20%2F%20tokio-dea584.svg" alt="Rust" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License: MIT" /></a>
+  <a href="docs/SPECIFICATION.md"><img src="https://img.shields.io/badge/spec-v0.2--DRAFT-orange.svg" alt="Spec v0.2 DRAFT" /></a>
+  <a href="#status"><img src="https://img.shields.io/badge/status-research%20prototype-lightgrey.svg" alt="Status" /></a>
+  <a href="https://github.com/thefear078/PPoSE-Protocol/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/thefear078/PPoSE-Protocol/ci.yml?branch=main" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/lang-Rust-dea584.svg" alt="Rust" />
 </p>
 
 <p align="center">
-  <a href="#why-ppose">Why</a> ·
-  <a href="#architecture">Architecture</a> ·
-  <a href="#key-metrics">Metrics</a> ·
+  <a href="#what-this-is">What this is</a> ·
+  <a href="#what-this-is-not">What this is not</a> ·
+  <a href="#working-today">Working today</a> ·
+  <a href="docs/THREAT_MODEL.md">Threat model</a> ·
   <a href="docs/SPECIFICATION.md">Specification</a> ·
-  <a href="#roadmap">Roadmap</a> ·
-  <a href="#security">Security</a> ·
-  <a href="#community--contact">Contact</a>
+  <a href="#roadmap">Roadmap</a>
 </p>
 
 ---
 
-## Why PPoSE?
+## What this is
 
-PPoSE is designed for environments where metadata is as dangerous as payload. It targets:
+PPoSE is a **research prototype** exploring how to combine:
 
-- **Global passive adversaries** (APT / nation-state traffic analysis)
-- **Malicious or compromised relays**
-- **Sybil / botnet admission attacks**
+| Axis | Inspiration | Status in this repo |
+|---|---|---|
+| Session crypto | [Noise Protocol](https://noiseprotocol.org/) XX | **Implemented** (loopback) |
+| Datagram AEAD | XChaCha20-Poly1305 | **Implemented** |
+| Transport | UDP | **Implemented** (loopback integration test) |
+| Source routing | Sphinx / HORNET *ideas* | **Not implemented** — see spec §4 |
+| Discovery | Blind rendezvous | **Sketch only** |
+| Cover traffic | Mixnet-style padding | **Not implemented** |
+| Admission | Invitation Web-of-Trust | **Sketch only** — not cryptographic Sybil defense |
 
-Core idea: no trusted third party ever sees a full communication path. After handshake, relays stay **stateless**. Transport is **UDP-first** with cryptographic agility and onion-style source routing.
-
-| Principle | Meaning |
-|---|---|
-| No trusted third parties | No node observes the full end-to-end relationship |
-| Stateless after handshake | Minimal relay memory surface |
-| UDP-first transport | Precise timing control for obfuscation |
-| Cryptographic agility | Algorithms swappable without protocol breakage |
-
----
-
-## Key Metrics
-
-| Metric | Target |
-|---|---|
-| LAN latency | &lt; 10 ms |
-| WAN latency | ~50–100 ms |
-| Internal MTU | Hard 1200 bytes |
-| Max hops | 3 (configurable up to 5) |
-| Forward secrecy | Full, per-message |
-| Metadata exposure | Zero |
-| Mobile battery (adaptive) | ~3–5% / hour |
+If you need production anonymity, use battle-tested systems (Tor, I2P, Nym, SimpleX, …) and read their papers and audits. This repository is for design iteration and a growing reference implementation.
 
 ---
 
-## Architecture
+## What this is not
+
+- **Not** “APT-grade” or “zero-metadata.” Those phrases were removed because they were marketing, not proven properties.
+- **Not** a competitor to Tor/I2P/Nym. There is no relay network, no directory, no traffic-analysis evaluation.
+- **Not** a FINAL / production-ready specification. Wire formats that are normative are marked **NORMATIVE**; the rest is **DRAFT / aspirational**.
+- **Not** a live bug-bounty program. Do not treat dollar figures as an active program.
+
+Honest limitations: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) and [docs/SPECIFICATION.md](docs/SPECIFICATION.md) §13.
+
+---
+
+## Working today (Phase 1 slice)
+
+Minimal path recommended by external review — **and now coded**:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   PPoSE v1.2 Protocol Stack                 │
-├─────────────────────────────────────────────────────────────┤
-│  L7  Application API              Messenger / files / voice │
-│  L6  Reliable Datagram (RDG)      ACK, fragment, retransmit │
-│  L5  Cryptography                 Noise XX + XChaCha20-Poly │
-│  L4  Source Routing               Sphinx-like onion wraps   │
-│  L3  Identity + NAT               Blind rendezvous + STUN   │
-│  L2  Traffic Obfuscation          Adaptive constant-rate    │
-│  L1  Transport                    UDP / TCP / WS / BLE      │
-└─────────────────────────────────────────────────────────────┘
+Ed25519 / X25519 identity
+        ↓
+Noise XX handshake (snow)
+        ↓
+XChaCha20-Poly1305 session AEAD
+        ↓
+UDP loopback (std::net)
+        ↓
+integration test: Alice ↔ Bob
 ```
-
-Full technical detail lives in **[docs/SPECIFICATION.md](docs/SPECIFICATION.md)** (v1.2-FINAL).
-
-### Cryptography (mandatory)
-
-| Component | Algorithm |
-|---|---|
-| Identity | Ed25519 |
-| Key exchange | X25519 |
-| AEAD | XChaCha20-Poly1305 |
-| Hash | BLAKE3 |
-| Handshake | Noise XX |
-| KDF | HKDF-SHA256 |
-
-Noise **XX** (not IK): full forward secrecy after handshake and KCI resistance. Extra RTT is a one-time session cost.
-
----
-
-## Status
-
-**Specification-complete / implementation in progress.**
-
-The protocol document is production-ready for implementers. The Rust reference crate is being scaffolded toward Phase 1 (crypto, packet codec, Noise XX).
-
-See the [implementation roadmap](#roadmap) and [CHANGELOG](CHANGELOG.md).
-
----
-
-## Quick start (developers)
 
 ```bash
 git clone https://github.com/thefear078/PPoSE-Protocol.git
 cd PPoSE-Protocol
-cargo check
 cargo test
+cargo run --example udp_chat   # optional demo
 ```
 
-Planned examples:
+### Wire envelope (cleartext outer header = 8 bytes)
 
-```bash
-cargo run --example cli_client
-cargo run --example relay_node
+Observers on the path see **no identity hashes** in the clear. Identities live only inside the Noise/AEAD ciphertext after handshake.
+
+```
+ offset  size  field
+ 0       2     MAGIC = 0x4A 0x7F
+ 2       1     VERSION = 0x03   (v0.2 wire)
+ 3       1     TYPE            (Handshake=1, Data=2, Ack=3)
+ 4       1     FLAGS
+ 5       3     reserved = 0
+ 8       …     ciphertext / handshake message
 ```
 
-Configuration sketch:
-
-```json
-{
-  "ppose": {
-    "version": "1.2",
-    "network": {
-      "internal_mtu": 1200,
-      "max_hops": 3
-    },
-    "traffic_mode": {
-      "default": "balanced"
-    }
-  }
-}
-```
+Full byte accounting: [docs/SPECIFICATION.md](docs/SPECIFICATION.md) §4.
 
 ---
 
-## Roadmap
+## Design principles (revised)
 
-| Phase | Focus | Window |
+1. **Endpoints hold state; relays hold bounded ephemera.** “Stateless relay” means *no circuit database*, not *zero memory*. Anti-replay windows, fragment timers, and cover schedules require short-lived state — the spec now says so explicitly.
+2. **Do not put routing or identity metadata in cleartext headers** unless a concrete, analyzed reason exists.
+3. **Cite constructions** (Noise, Sphinx paper) instead of inventing “Sphinx-like” without a security argument.
+4. **Separate goals from measurements.** Latency/battery numbers are *targets for future benchmarks*, not claims about the current crate.
+
+---
+
+## Aspirational targets (unmeasured)
+
+| Quantity | Target (future) | Current evidence |
 |---|---|---|
-| **1** | Core infra — crypto, packet codec, Noise XX | Weeks 1–3 |
-| **2** | Networking — UDP, STUN, blind rendezvous | Weeks 4–6 |
-| **3** | Reliability & routing — ARQ, Sphinx hops, MTU | Weeks 7–9 |
-| **4** | Hardening — obfuscation modes, WoT, benches | Weeks 10–14 |
-| **5** | External audit, bug bounty, v1.0 release | Week 15+ |
+| LAN RTT (direct) | &lt; 10 ms | unmeasured |
+| WAN RTT (direct) | 50–100 ms | unmeasured |
+| Internal MTU | 1200 B | constant in code |
+| Hop count | research open | direct path only today |
+| Battery impact of cover traffic | unknown | no cover traffic yet |
 
 ---
 
-## Security
+## Roadmap (honest)
 
-Threat model: **global passive adversary + malicious relays**.
-
-- Report vulnerabilities privately via [GitHub Security Advisories](https://github.com/thefear078/PPoSE-Protocol/security/advisories/new)
-- Do **not** open public issues for unfixed security bugs
-- Details: **[SECURITY.md](SECURITY.md)**
-
-Planned bug bounty: up to **$10,000 USD** for critical findings (program TBD before v1.0).
-
----
-
-## Repository layout
-
-```
-PPoSE-Protocol/
-├── assets/           # Brand icon (honey / onion-layer motif)
-├── docs/             # Formal specification
-├── src/              # Rust reference implementation
-│   ├── crypto/
-│   ├── network/
-│   ├── reliability/
-│   └── identity/
-├── tests/
-├── benches/
-├── examples/
-├── SECURITY.md
-├── CONTRIBUTING.md
-└── LICENSE           # MIT
-```
+| Phase | Scope | Done? |
+|---|---|---|
+| **0** | Honest docs, threat model, byte-accurate envelope | **this commit** |
+| **1** | Keys → Noise XX → AEAD → UDP loopback → tests | **this commit** |
+| **2** | Lossy UDP, ACK/retransmit, fragment reassembly | next |
+| **3** | Single intermediate forwarder + replay window | later |
+| **4** | Adopt or formally specify onion routing (cite Sphinx/HORNET) | later |
+| **5** | Rendezvous sketch → threat analysis → then code | later |
+| **6** | Cover traffic + measurement harness | later |
+| **7** | External review / audit when there is something to audit | much later |
 
 ---
 
-## Community & contact
+## Documentation map
 
-| Channel | Link |
+| Doc | Role |
 |---|---|
-| Issues | [GitHub Issues](https://github.com/thefear078/PPoSE-Protocol/issues) |
-| Discussions | [GitHub Discussions](https://github.com/thefear078/PPoSE-Protocol/discussions) |
-| Security | [Private advisory](https://github.com/thefear078/PPoSE-Protocol/security/advisories/new) |
-| Maintainer | [@thefear078](https://github.com/thefear078) |
+| [docs/SPECIFICATION.md](docs/SPECIFICATION.md) | Wire + crypto (DRAFT) |
+| [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Claims / non-claims |
+| [docs/PACKET.md](docs/PACKET.md) | Byte-level packet workbook |
+| [SECURITY.md](SECURITY.md) | How to report issues |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev workflow |
 
-Questions about the spec → open a Discussion. Implementation bugs → open an Issue. Crypto/privacy flaws → Security Advisories only.
+---
+
+## Security contact
+
+Private reports: [GitHub Security Advisories](https://github.com/thefear078/PPoSE-Protocol/security/advisories/new).
+
+There is **no active paid bug bounty**. If one is funded later, it will be announced in `SECURITY.md` with dates and tiers — not promised in advance.
 
 ---
 
 ## License
 
-MIT © 2026 [The Fear](https://github.com/thefear078) — see [LICENSE](LICENSE).
+MIT © 2026 [The Fear](https://github.com/thefear078) — [LICENSE](LICENSE).
 
 ---
 
 ## Tags
 
-`#PPoSE` `#P2P` `#Privacy` `#Anonymity` `#ZeroMetadata` `#OnionRouting` `#NoiseProtocol` `#XChaCha20` `#Ed25519` `#BLAKE3` `#UDP` `#NATTraversal` `#BlindRendezvous` `#Rust` `#tokio` `#APTResistant` `#Stateless` `#ForwardSecrecy` `#HoneypotYellow` `#OpenSource`
+`#PPoSE` `#research` `#NoiseProtocol` `#XChaCha20` `#UDP` `#Rust` `#draft-spec` `#P2P`

@@ -1,5 +1,6 @@
-//! Networking layer (L1–L4): transport, NAT, rendezvous, packets, routing.
+//! Framing and UDP helpers.
 
 pub mod packet;
+pub mod udp;
 
-pub use packet::{PacketType, HEADER_LEN};
+pub use packet::{decode_outer, encode_outer, PacketType};
