@@ -180,6 +180,12 @@ impl OnionRelay {
             Ok(v) => v,
             Err(_) => return Ok(false),
         };
+        // Refuse to forward a layer that points back at this same relay —
+        // a malformed or malicious route would otherwise loop the relay
+        // back into itself.
+        if peeled.next == self.local_addr()? {
+            return Ok(false);
+        }
         if !self.replay.accept(&peeled.payload, Instant::now()) {
             return Ok(false);
         }

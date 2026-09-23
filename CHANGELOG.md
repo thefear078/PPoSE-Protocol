@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Invitation Web-of-Trust admission (`src/admission.rs`): Ed25519-signed, time-bounded invitations; `TrustStore` walks chains from trusted roots with a local per-issuer subject cap. Documented as a policy layer, **not** a cryptographic Sybil defense.
 - `examples/admission_demo.rs` walkthrough
 - CLI: `ppose listen`/`connect --pin <hex32>` to pin the expected remote Noise static key (fails closed instead of trust-on-first-use), and `--key <hex32>` to load a persistent local identity so a peer's pin survives restarts
+- `docs/SECURITY_REVIEW.md`: internal self-review of `src/crypto/*`, `src/onion.rs`, `src/session.rs`, `src/network/*`, `src/reliability/*`, `src/rendezvous.rs`, `src/relay.rs`, `src/admission.rs` — explicitly **not** a substitute for the external review roadmap Phase 7 still calls for
+
+### Fixed
+
+- `ReplayCache::accept` (`src/network/replay.rs`) did a full `O(n)` sweep on every packet; duplicate detection is now checked per-key (correct on every call) and the reclaiming sweep is throttled to every 64 calls or when at capacity
+- Onion relay (`src/onion.rs::OnionRelay::step`) now drops a peeled layer whose next-hop address is the relay's own bound address, preventing a trivial single-hop loop
 
 ### Changed
 

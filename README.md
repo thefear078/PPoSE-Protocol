@@ -140,6 +140,7 @@ No identity hashes in the clear. Byte workbook: [docs/PACKET.md](docs/PACKET.md)
 | [docs/SPECIFICATION.md](docs/SPECIFICATION.md) | Wire + crypto (DRAFT) |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Claims / non-claims |
 | [docs/PACKET.md](docs/PACKET.md) | Byte-level packet workbook |
+| [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) | Internal self-review — **not** a substitute for Phase 7 external review |
 | [SECURITY.md](SECURITY.md) | How to report issues |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Dev workflow |
 
