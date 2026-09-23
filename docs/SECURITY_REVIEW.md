@@ -48,7 +48,7 @@ themselves (treated as trusted, widely-used dependencies).
   (a 32-byte token) that always fits `MAX_DATAGRAM` — both unreachable in
   practice, not just "shouldn't happen."
 
-## Findings (informational — none blocked current use as a research prototype)
+## Findings (informational — none blocked current use as a research prototype; all four addressed as of this review)
 
 1. **Fixed.** `ReplayCache::accept` ran a full `O(n)` `HashMap::retain` scan
    on *every* accepted packet (`src/network/replay.rs`, used by the IPv4
