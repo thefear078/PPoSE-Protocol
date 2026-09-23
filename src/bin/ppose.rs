@@ -114,11 +114,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let remote = s.remote_static()?;
                 if !store.is_admitted(&remote, admit_depth, now) {
-                    return Err(format!(
-                        "remote identity {} not admitted (Web-of-Trust gate, depth {admit_depth})",
+                    let reason = format!(
+                        "rejected: identity {} not admitted (Web-of-Trust gate, depth {admit_depth})",
                         hex(&remote)
-                    )
-                    .into());
+                    );
+                    // The handshake already completed, so we have a working
+                    // authenticated channel — use it to tell the peer why,
+                    // instead of just dropping the connection and leaving
+                    // them with a bare OS-level reset. Best-effort: if this
+                    // send also fails, the operator's own error below still
+                    // explains what happened on this end.
+                    let _ = s.send(reason.as_bytes());
+                    return Err(reason.into());
                 }
                 println!("admit remote identity is admitted");
             }

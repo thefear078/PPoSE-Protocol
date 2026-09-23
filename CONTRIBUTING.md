@@ -29,7 +29,6 @@ cargo run --example udp_chat
 | High | Fit cover payload size *and* interval to a real measured traffic distribution (currently hand-picked ranges — see `examples/cover_measurement.rs`, `CoverMode::payload_len_range`/`interval_range`) |
 | High | Adopt Sphinx if onion must match literature |
 | Low | Formal correlation analysis of rendezvous |
-| Low | Give the rejected peer a clean signal when `listen --admit-root` rejects them, instead of just dropping the connection (`src/bin/ppose.rs`'s `listen`) |
 | Low | Wire `src/admission.rs` TrustStore into the token-rendezvous (`rs`) service — harder than `listen`'s gate since registration tokens aren't tied to an authenticated identity today |
 
 ## Pull request checklist
