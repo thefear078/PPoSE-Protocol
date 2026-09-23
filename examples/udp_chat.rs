@@ -35,9 +35,5 @@ fn main() {
 }
 
 fn hex_prefix(bytes: &[u8; 32]) -> String {
-    bytes[..4]
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<Vec<_>>()
-        .join("")
+    bytes[..4].iter().map(|b| format!("{b:02x}")).collect()
 }
