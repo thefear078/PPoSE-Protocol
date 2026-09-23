@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Invitation Web-of-Trust admission (`src/admission.rs`): Ed25519-signed, time-bounded invitations; `TrustStore` walks chains from trusted roots with a local per-issuer subject cap. Documented as a policy layer, **not** a cryptographic Sybil defense.
+- `examples/admission_demo.rs` walkthrough
+
+### Changed
+
+- Cleaned up several clippy-pedantic nits (`let...else`, redundant `continue`, hex-encoding helpers) with no behavior change
+
 ## [0.4.0] — 2026-09-22
 
 ### Added

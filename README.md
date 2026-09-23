@@ -42,7 +42,7 @@ PPoSE is a **research prototype** with a running reference crate:
 | Nested hops | PND layered AEAD | **Implemented** — **not Sphinx**, hops see next IP |
 | Discovery | Token rendezvous | **Implemented** — collusion not solved |
 | Cover traffic | TYPE=Data random bodies | **Implemented** — unmeasured, not mixnet |
-| Admission | Invitation Web-of-Trust | **Sketch only** |
+| Admission | Invitation Web-of-Trust (Ed25519 signed, chain-depth) | **Implemented** — policy layer, not a Sybil defense |
 
 If you need production anonymity, use battle-tested systems (Tor, I2P, Nym, SimpleX, …). This repo is for a testable design, not a Tor competitor.
 
@@ -80,6 +80,9 @@ cargo run --bin ppose -- connect 127.0.0.1:9000
 
 # optional forwarder (sees destination addresses)
 cargo run --example relay_node -- 127.0.0.1:8000
+
+# invitation web-of-trust admission walkthrough
+cargo run --example admission_demo
 ```
 
 Tests cover: handshake, ARQ loss recovery, 2 kB fragmentation, Alice↔Bob through a relay.
@@ -120,6 +123,7 @@ No identity hashes in the clear. Byte workbook: [docs/PACKET.md](docs/PACKET.md)
 | **4** | Nested hops: specified PND (explicitly not Sphinx) | yes |
 | **5** | Token rendezvous (collusion documented, not solved) | yes |
 | **6** | Cover datagrams (unmeasured) | yes |
+| **6.5** | Invitation Web-of-Trust admission (Ed25519 chains, local per-issuer cap) | yes (not a Sybil defense) |
 | **7** | External review / mixnet / GPA evaluation | no |
 
 ---
