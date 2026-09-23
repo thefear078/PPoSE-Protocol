@@ -9,7 +9,7 @@
 │  are revoked. See docs/THREAT_MODEL.md                     │
 │  License: MIT                                              │
 │  Target: Rust                                              │
-│  Updated: 2026-09-22                                       │
+│  Updated: 2026-09-23                                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -38,9 +38,15 @@ PPoSE explores encrypted peer-to-peer datagrams with an optional future onion-fo
 Implemented now:
   App → ARQ/fragments → Noise XX transport → Outer header → UDP
                  ↘ optional TYPE=Forward IPv4 wrap (relay sees dest)
+                 ↘ optional TYPE=Onion PND nested hops (XChaCha20-Poly1305, not Sphinx)
+                 ↘ optional TYPE=Rendezvous token discovery (collusion not solved)
+                 ↘ optional TYPE=Data cover datagrams (unmeasured)
+  Admission: separate Ed25519 Invitation Web-of-Trust (src/admission.rs,
+             not on the wire path above — a local policy gate, not a
+             Sybil defense; see §7)
 
 Not implemented:
-  Sphinx/HORNET onion  ·  rendezvous  ·  cover traffic
+  Sphinx/HORNET onion  ·  blind rendezvous operator-independence proofs  ·  mixing
 ```
 
 ### 2.1 “Stateless” clarified (NORMATIVE intent)
@@ -55,10 +61,12 @@ Not implemented:
 
 | Role | Algorithm | Notes |
 |---|---|---|
-| Identity signature | Ed25519 | Long-term |
+| Core PPoSE identity | X25519 | Noise static key; authenticated via DH in the handshake, **not** a separate signature |
 | DH / Noise | X25519 | Via Noise XX |
 | Handshake framework | Noise `XX` | [Noise spec](https://noiseprotocol.org/noise.html) |
-| Session AEAD | XChaCha20-Poly1305 | 24-byte nonce |
+| Handshake/session AEAD | ChaCha20-Poly1305 | Via `snow`'s Noise cipher suite (§4.3) |
+| Onion-hop AEAD | XChaCha20-Poly1305 | 24-byte nonce; used for `TYPE=Onion` PND layers only (§4.5, `src/onion.rs`) |
+| Admission invitation signature | Ed25519 | Separate keypair from the core identity above; signs `Invitation`s only (§7, `src/admission.rs`) |
 | Hash | BLAKE3 | Transcript helpers / IDs *inside ciphertext* |
 | KDF | HKDF-SHA256 | As used by Noise / explicit session KDF |
 
@@ -120,8 +128,9 @@ Phase 1 **NORMATIVE** path uses Noise **transport** messages from the same
 [outer 8][snow_transport_ciphertext]
 ```
 
-Standalone XChaCha20-Poly1305 (`crypto::aead`) is available for future frames
-but is not used on the Phase 1 UDP path.
+Standalone XChaCha20-Poly1305 (`crypto::aead`) is not used on the direct
+endpoint-to-endpoint `TYPE=Data` path above, but it **is** used to seal each
+`TYPE=Onion` PND layer (§4.5) — that construction shipped in v0.4.
 
 Byte workbook: [PACKET.md](PACKET.md).
 
@@ -132,11 +141,17 @@ INTERNAL_MTU = 1200   // soft target for future path probing
 PHASE1_MAX_UDP = 1200 // reference impl rejects larger plaintext wraps
 ```
 
-### 4.5 Onion routing (DRAFT — not implemented)
+### 4.5 Onion routing — PND nested hops (implemented, explicitly not Sphinx)
 
-Do **not** call the current code “Sphinx.”
+Do **not** call this code “Sphinx.” `TYPE=Onion` (`src/onion.rs`) wraps the
+payload in one XChaCha20-Poly1305 layer per hop; each hop peels its layer
+(`peel_layer`) and forwards to the next IPv4 address it learns from that
+layer — **the hop sees the next hop's IP**, same as the plain IPv4
+forwarder (§5.1). It provides no traffic analysis resistance and is not a
+mixnet. Tested for a 2-hop path (`tests/onion_path.rs`).
 
-When multi-hop is introduced, prefer:
+Real Sphinx/HORNET-grade onion routing remains **out of scope** for this
+prototype. If it is ever attempted, prefer:
 
 1. Implement [Sphinx](https://cypherpunks.ca/~iang/pubs/Sphinx_Oakland09.pdf) (Danezis–Goldberg) with a cited parameter set, **or**
 2. Publish a complete custom construction with a security argument.
@@ -245,9 +260,9 @@ See README. Spec versions: `0.3-DRAFT` (this) → `1.0` only after interop vecto
 | System | Borrowed idea | Difference |
 |---|---|---|
 | Noise | XX handshake | We are not inventing a new handshake |
-| Sphinx / HORNET | Onion packet format | Not implemented |
-| Loopix / Nym | Cover / mixing | Not implemented |
-| Cwtch / Briar | Invitation trust | Sketch only |
+| Sphinx / HORNET | Onion packet format | Not implemented — we ship PND layered AEAD instead (§4.5), explicitly not Sphinx |
+| Loopix / Nym | Cover / mixing | Cover datagrams implemented (unmeasured, §8); no mixing/batching |
+| Cwtch / Briar | Invitation trust | Implemented as signed Ed25519 chains (§7) — still not a cryptographic Sybil defense |
 | Tor | GPA discussion | We make **weaker** claims |
 
 ---
@@ -256,9 +271,9 @@ See README. Spec versions: `0.3-DRAFT` (this) → `1.0` only after interop vecto
 
 | Issue | Status |
 |---|---|
-| No multi-hop network | true |
+| No Sphinx/mixnet-grade multi-hop network | true — PND onion hops exist (§4.5) but each hop sees the next IP and there is no mixing |
 | No GPA resistance claim | true |
-| Soft Sybil policy | true |
+| Soft Sybil policy | true — Invitation WoT is implemented (§7) but is a local policy gate, not a cryptographic defense |
 | Rendezvous underspecified | true |
 | Cleartext sizes/timings leak | inherent to Phase 1 |
 | Relay anti-replay needs state | acknowledged |

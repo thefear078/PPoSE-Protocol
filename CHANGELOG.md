@@ -11,10 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Invitation Web-of-Trust admission (`src/admission.rs`): Ed25519-signed, time-bounded invitations; `TrustStore` walks chains from trusted roots with a local per-issuer subject cap. Documented as a policy layer, **not** a cryptographic Sybil defense.
 - `examples/admission_demo.rs` walkthrough
+- CLI: `ppose listen`/`connect --pin <hex32>` to pin the expected remote Noise static key (fails closed instead of trust-on-first-use), and `--key <hex32>` to load a persistent local identity so a peer's pin survives restarts
 
 ### Changed
 
 - Cleaned up several clippy-pedantic nits (`let...else`, redundant `continue`, hex-encoding helpers) with no behavior change
+- `docs/SPECIFICATION.md` architecture diagram, crypto primitives table, §4.5 onion heading, prior-art table, and limitations table updated — several had gone stale since v0.4 shipped onion/rendezvous/cover (still said "not implemented")
 
 ## [0.4.0] — 2026-09-22
 

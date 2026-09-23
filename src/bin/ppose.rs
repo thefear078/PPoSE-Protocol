@@ -6,6 +6,7 @@ use std::process;
 use std::time::Duration;
 
 use ppose::crypto::keys::IdentitySecret;
+use ppose::crypto::keys::PublicIdentity;
 use ppose::network::udp::bind_loopback;
 use ppose::onion::OnionRelay;
 use ppose::relay::Relay;
@@ -42,25 +43,42 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         "listen" => {
-            let bind = args.next().unwrap_or_else(|| "127.0.0.1:0".into());
+            let mut rest: Vec<String> = args.collect();
+            let pin = take_pin_flag(&mut rest, "--pin")?;
+            let id = take_key_flag(&mut rest, "--key")?.unwrap_or_else(IdentitySecret::generate);
+            let bind = if rest.is_empty() {
+                "127.0.0.1:0".to_string()
+            } else {
+                rest.remove(0)
+            };
             let sock = UdpSocket::bind(&bind)?;
             sock.set_read_timeout(Some(Duration::from_secs(30)))?;
             println!("listen {}", sock.local_addr()?);
-            let id = IdentitySecret::generate();
             println!("fp {}", hex(&id.public().fingerprint()));
-            let mut s = UdpSession::accept_responder(sock, &id, None)?;
+            if pin.is_some() {
+                println!("pin   expecting pinned remote static key");
+            }
+            let mut s = UdpSession::accept_responder_pinned(sock, &id, None, pin)?;
             let msg = s.recv(Duration::from_secs(30))?;
             println!("recv {}", String::from_utf8_lossy(&msg));
             s.send(b"ack")?;
             Ok(())
         }
         "connect" => {
-            let peer: std::net::SocketAddr =
-                args.next().ok_or("usage: ppose connect <peer>")?.parse()?;
+            let mut rest: Vec<String> = args.collect();
+            let pin = take_pin_flag(&mut rest, "--pin")?;
+            let id = take_key_flag(&mut rest, "--key")?.unwrap_or_else(IdentitySecret::generate);
+            if rest.is_empty() {
+                return Err("usage: ppose connect <peer> [--pin <hex32>] [--key <hex32>]".into());
+            }
+            let peer: std::net::SocketAddr = rest.remove(0).parse()?;
             let (sock, addr) = bind_loopback()?;
             println!("local {addr}");
-            let id = IdentitySecret::generate();
-            let mut s = UdpSession::connect_initiator(sock, &id, Path::Direct { peer })?;
+            if pin.is_some() {
+                println!("pin   expecting pinned remote static key");
+            }
+            let mut s =
+                UdpSession::connect_initiator_pinned(sock, &id, Path::Direct { peer }, pin)?;
             s.send(b"hello")?;
             let reply = s.recv(Duration::from_secs(10))?;
             println!("recv {}", String::from_utf8_lossy(&reply));
@@ -130,15 +148,76 @@ fn print_help() {
         "ppose {CRATE_VERSION} — research prototype (not an anonymity network)\n\n\
          Commands:\n\
            keygen\n\
-           listen [bind]\n\
-           connect <peer>\n\
+           listen [bind] [--pin <hex32>] [--key <hex32>]\n\
+           connect <peer> [--pin <hex32>] [--key <hex32>]\n\
            relay [bind]              cleartext dest forwarder\n\
            onion-relay [bind]        PND hop (not Sphinx)\n\
            rs [bind]                 token rendezvous\n\
            rs-register <rs> [psk]\n\
            rs-lookup <rs> [psk]\n\
-           version\n"
+           version\n\n\
+         --pin pins the expected remote Noise static public key (64 hex\n\
+         chars, from the peer's `keygen` \"public\" line) so the handshake\n\
+         fails closed on an unexpected key instead of trust-on-first-use.\n\
+         --key loads a persistent local identity (64 hex chars, from this\n\
+         node's own `keygen` \"secret\" line) instead of a fresh random one\n\
+         each run — needed so a peer's --pin stays valid across restarts.\n"
     );
+}
+
+/// Remove a `--pin <hex32>` flag from `args` (if present) and parse it into
+/// the identity a peer must present at handshake time.
+///
+/// # Errors
+/// Returns an error if the flag is given without a value or the value is
+/// not 64 hex characters encoding 32 bytes.
+fn take_pin_flag(
+    args: &mut Vec<String>,
+    flag: &str,
+) -> Result<Option<PublicIdentity>, Box<dyn std::error::Error>> {
+    take_flag(args, flag)?
+        .map(|v| parse_hex32(&v).map(PublicIdentity::from_bytes))
+        .transpose()
+}
+
+/// Remove a `--key <hex32>` flag from `args` (if present) and parse it into
+/// a persistent local identity secret.
+///
+/// # Errors
+/// Returns an error if the flag is given without a value or the value is
+/// not 64 hex characters encoding 32 bytes.
+fn take_key_flag(
+    args: &mut Vec<String>,
+    flag: &str,
+) -> Result<Option<IdentitySecret>, Box<dyn std::error::Error>> {
+    take_flag(args, flag)?
+        .map(|v| parse_hex32(&v).map(IdentitySecret::from_bytes))
+        .transpose()
+}
+
+fn take_flag(
+    args: &mut Vec<String>,
+    flag: &str,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let Some(pos) = args.iter().position(|a| a == flag) else {
+        return Ok(None);
+    };
+    if pos + 1 >= args.len() {
+        return Err(format!("{flag} requires a 64-hex-char value").into());
+    }
+    args.remove(pos);
+    Ok(Some(args.remove(pos)))
+}
+
+fn parse_hex32(s: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    if s.len() != 64 {
+        return Err(format!("expected 64 hex chars, got {}", s.len()).into());
+    }
+    let mut out = [0u8; 32];
+    for (i, chunk) in out.iter_mut().enumerate() {
+        *chunk = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)?;
+    }
+    Ok(out)
 }
 
 fn hex(bytes: &[u8]) -> String {

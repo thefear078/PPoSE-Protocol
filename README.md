@@ -78,6 +78,11 @@ cargo run --example udp_chat
 cargo run --bin ppose -- listen 127.0.0.1:9000
 cargo run --bin ppose -- connect 127.0.0.1:9000
 
+# pin the remote static key instead of trust-on-first-use
+cargo run --bin ppose -- keygen                              # note "secret" and "public"
+cargo run --bin ppose -- listen 127.0.0.1:9000 --key <secret hex>
+cargo run --bin ppose -- connect 127.0.0.1:9000 --pin <public hex>
+
 # optional forwarder (sees destination addresses)
 cargo run --example relay_node -- 127.0.0.1:8000
 

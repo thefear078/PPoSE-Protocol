@@ -28,8 +28,8 @@ cargo run --example udp_chat
 |---|---|
 | High | Measurement harness for cover (size/timing) |
 | High | Adopt Sphinx if onion must match literature |
-| Medium | Pin remote keys in the CLI demos |
 | Low | Formal correlation analysis of rendezvous |
+| Low | Wire `src/admission.rs` TrustStore into `rs`/`relay` CLI as an opt-in gate |
 
 ## Pull request checklist
 
