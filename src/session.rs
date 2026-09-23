@@ -407,7 +407,12 @@ impl UdpSession {
             return Ok(());
         }
         self.last_cover = now;
-        let n = self.cover.payload_len();
+        let (min, max) = self.cover.payload_len_range();
+        let n = if max > min {
+            min + (OsRng.next_u32() as usize % (max - min))
+        } else {
+            min
+        };
         let mut body = vec![0u8; n];
         OsRng.fill_bytes(&mut body);
         self.send_inner(PacketType::Data, &body)

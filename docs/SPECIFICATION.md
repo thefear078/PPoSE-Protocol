@@ -212,9 +212,35 @@ What this still is **not**: a cryptographic Sybil defense. A signature only prov
 
 ---
 
-## 8. Cover traffic (DRAFT)
+## 8. Cover traffic (implemented, measured, still not mixnet-grade)
 
-Constant-rate / stealth modes are unimplemented. Any battery percentage in older docs is **unmeasured fiction** and revoked.
+`src/cover.rs` implements two idle-time cover modes — `Balanced` (~200 ms
+cadence) and `Stealth` (~50 ms cadence) — that send `TYPE=Data` packets of
+random bytes (never Noise-sealed) when the session is otherwise idle; the
+receiver drops them because they fail to decrypt.
+
+Measured by `examples/cover_measurement.rs` against the real encoding path
+(not estimated):
+
+| Traffic | Wire size |
+|---|---|
+| ACK | 37 bytes (constant) |
+| DATA, 8 B app chunk | 41 bytes |
+| DATA, 1024 B app chunk | 1057 bytes |
+| Cover, `Balanced` | 24–520 bytes (uniform per packet) |
+| Cover, `Stealth` | 24–264 bytes (uniform per packet) |
+
+The cover payload length is randomized (not a fixed 64 bytes, which earlier
+code used and which made every cover packet the exact same size — trivially
+distinguishable by a passive size-frequency observer from both the
+differently-sized-but-also-fixed ACK and the naturally variable DATA
+fragments). The current range overlaps plausible real sizes but was chosen
+by hand, not fit to any measured application traffic distribution — an
+observer with enough samples can likely still separate cover's uniform
+distribution from real traffic's actual one. Timing is unchanged: fixed
+50 ms / 200 ms cadence, not measured or randomized here. Battery-cost
+percentages from older drafts remain **unmeasured fiction** and revoked —
+nothing in this project measures power draw.
 
 ---
 

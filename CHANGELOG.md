@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `examples/admission_demo.rs` walkthrough
 - CLI: `ppose listen`/`connect --pin <hex32>` to pin the expected remote Noise static key (fails closed instead of trust-on-first-use), and `--key <hex32>` to load a persistent local identity so a peer's pin survives restarts
 - `docs/SECURITY_REVIEW.md`: internal self-review of `src/crypto/*`, `src/onion.rs`, `src/session.rs`, `src/network/*`, `src/reliability/*`, `src/rendezvous.rs`, `src/relay.rs`, `src/admission.rs` — explicitly **not** a substitute for the external review roadmap Phase 7 still calls for
+- `examples/cover_measurement.rs`: measures real ACK/DATA/cover wire sizes against the project's actual encoding + a live Noise session — replaces the "unmeasured" size claim in `docs/SPECIFICATION.md` §8 with real numbers
+- `tests/cover.rs`: first test coverage at all for `CoverMode`/`set_cover` — confirms a real message still delivers correctly with cover traffic interleaved (cover packets fail to decrypt and are silently dropped; `snow` only advances its receive nonce on success, so no desync)
 
 ### Fixed
 
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Onion relay (`src/onion.rs::OnionRelay::step`) now drops a peeled layer whose next-hop address is the relay's own bound address, preventing a trivial single-hop loop
 - `NoiseSession::pin_remote` (`src/crypto/noise.rs`) now uses `subtle::ConstantTimeEq` instead of `!=`; defensive hygiene rather than a fix for an exploitable leak, since both sides were already public key material
 - `TrustStore::trust_depth` (`src/admission.rs`) no longer re-runs Ed25519 verification on every stored invitation for every query; only the cheap time window is rechecked, since `ingest` already verifies once before storing and invitations are immutable afterward
+- Cover packets were a fixed 72 bytes on the wire regardless of mode (`src/cover.rs`'s 64-byte constant + 8-byte outer header), contradicting the module's own claim of being size-indistinguishable from real traffic; `CoverMode::payload_len_range` now gives a per-packet randomized range instead. Still a hand-picked range, not fit to measured real traffic — noted as open work in `CONTRIBUTING.md`.
 
 ### Changed
 

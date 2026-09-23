@@ -26,7 +26,8 @@ cargo run --example udp_chat
 
 | Priority | Area |
 |---|---|
-| High | Measurement harness for cover (size/timing) |
+| High | Fit cover payload size to a real measured traffic distribution (currently a hand-picked range — see `examples/cover_measurement.rs`) |
+| High | Measure/randomize cover *timing*, not just size (`docs/SPECIFICATION.md` §8) |
 | High | Adopt Sphinx if onion must match literature |
 | Low | Formal correlation analysis of rendezvous |
 | Low | Wire `src/admission.rs` TrustStore into `rs`/`relay` CLI as an opt-in gate |

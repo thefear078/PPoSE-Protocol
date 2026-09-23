@@ -41,7 +41,7 @@ PPoSE is a **research prototype** with a running reference crate:
 | 1-hop forwarder | Cleartext dest wrap + replay cache | **Implemented** (sees dest IP) |
 | Nested hops | PND layered AEAD | **Implemented** — **not Sphinx**, hops see next IP |
 | Discovery | Token rendezvous | **Implemented** — collusion not solved |
-| Cover traffic | TYPE=Data random bodies | **Implemented** — unmeasured, not mixnet |
+| Cover traffic | TYPE=Data random bodies, randomized size | **Implemented** — size measured (§8), timing not, not mixnet |
 | Admission | Invitation Web-of-Trust (Ed25519 signed, chain-depth) | **Implemented** — policy layer, not a Sybil defense |
 
 If you need production anonymity, use battle-tested systems (Tor, I2P, Nym, SimpleX, …). This repo is for a testable design, not a Tor competitor.
@@ -88,6 +88,9 @@ cargo run --example relay_node -- 127.0.0.1:8000
 
 # invitation web-of-trust admission walkthrough
 cargo run --example admission_demo
+
+# cover-traffic wire-size measurement (real vs cover packet sizes)
+cargo run --example cover_measurement
 ```
 
 Tests cover: handshake, ARQ loss recovery, 2 kB fragmentation, Alice↔Bob through a relay.
@@ -127,7 +130,7 @@ No identity hashes in the clear. Byte workbook: [docs/PACKET.md](docs/PACKET.md)
 | **3** | IPv4 forwarder + replay window | yes (not anonymous) |
 | **4** | Nested hops: specified PND (explicitly not Sphinx) | yes |
 | **5** | Token rendezvous (collusion documented, not solved) | yes |
-| **6** | Cover datagrams (unmeasured) | yes |
+| **6** | Cover datagrams (size measured, randomized; timing still unmeasured) | yes |
 | **6.5** | Invitation Web-of-Trust admission (Ed25519 chains, local per-issuer cap) | yes (not a Sybil defense) |
 | **7** | External review / mixnet / GPA evaluation | no |
 

@@ -34,6 +34,10 @@ name = "admission_demo"
 path = "examples/admission_demo.rs"
 
 [[example]]
+name = "cover_measurement"
+path = "examples/cover_measurement.rs"
+
+[[example]]
 name = "udp_chat"
 path = "examples/udp_chat.rs"
 
