@@ -16,6 +16,7 @@ categories = ["network-programming", "cryptography"]
 [dependencies]
 blake3 = "1"
 chacha20poly1305 = "0.10"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 snow = "0.9"
 thiserror = "1"
@@ -26,6 +27,10 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 [lib]
 name = "ppose"
 path = "src/lib.rs"
+
+[[example]]
+name = "admission_demo"
+path = "examples/admission_demo.rs"
 
 [[example]]
 name = "udp_chat"

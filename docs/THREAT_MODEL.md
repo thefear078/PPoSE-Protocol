@@ -22,7 +22,7 @@
 | **Malicious relay / onion hop** | Sees next IP after peel; can drop/delay | **No anonymity vs the hop.** Payload of inner layers stays sealed until last hop. |
 | **Colluding rendezvous servers** | Share tokens, IPs, timing | **No claim** — documented limitation |
 | **Global passive adversary (GPA)** | Observes all links, timing, sizes | **No claim** |
-| **Sybil operator** | Spins many identities | Invitation WoT sketch is **not** a cryptographic defense |
+| **Sybil operator** | Spins many identities | `src/admission.rs` Invitation WoT is implemented (signed, chain-verified) but is **not** a cryptographic Sybil defense — an admitted issuer can still vouch for unlimited sock puppets across different local stores |
 
 This is **not** a UC / game-based proof. It is an engineering threat sketch so implementers know what *not* to advertise.
 

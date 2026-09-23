@@ -28,6 +28,7 @@ PPoSE explores encrypted peer-to-peer datagrams with an optional future onion-fo
 | IPv4 forwarder + PND onion hops | Blind RS independence proofs |
 | Token rendezvous | Sybil-hard admission |
 | Cover datagrams (unmeasured) | Bug bounty / audit |
+| Invitation Web-of-Trust admission (Ed25519 chains) | Network-wide Sybil resistance |
 
 ---
 
@@ -184,9 +185,15 @@ Until those have answers + tests, rendezvous text is non-normative.
 
 ---
 
-## 7. Trust / Sybil (DRAFT sketch)
+## 7. Trust / Sybil admission (implemented, not a Sybil defense)
 
-Invitation Web-of-Trust and reputation arithmetic are **policy sketches**, not cryptographic Sybil defenses. Soft scores can be farmed. Hardcoded bootstrap nodes are an explicit cold-start centralization trade-off.
+`src/admission.rs` implements the Invitation Web-of-Trust as a real, tested mechanism rather than a sketch:
+
+- A separate Ed25519 keypair (`InviteSigningKey`) — deliberately not the X25519 Noise identity — signs `Invitation`s: `issuer(32) || subject(32) || issued_at(8) || expires_at(8) || signature(64)`, 144 bytes on the wire, domain-separated with the tag `ppose-invite-v1`.
+- A local `TrustStore` holds one or more trusted root verifying keys and a set of ingested invitations, and answers `is_admitted(subject, max_depth, now)` by BFS over the invitation graph, re-checking each edge's signature and expiry at query time.
+- `TrustStore::set_max_invitees_per_issuer` caps how many distinct subjects one issuer can get admitted through *that local store*.
+
+What this still is **not**: a cryptographic Sybil defense. A signature only proves an issuer chose to vouch for a key; nothing stops an admitted issuer from minting many subject keypairs and vouching for all of them. The per-issuer cap is a local, non-networked mitigation, not consensus-enforced. Hardcoded bootstrap roots remain an explicit cold-start centralization trade-off. Reputation *scores* (as opposed to chain membership) are not implemented — deliberately, since scores are exactly the part `docs/THREAT_MODEL.md` warns is farmable.
 
 ---
 
