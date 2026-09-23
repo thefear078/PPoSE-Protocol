@@ -214,10 +214,11 @@ What this still is **not**: a cryptographic Sybil defense. A signature only prov
 
 ## 8. Cover traffic (implemented, measured, still not mixnet-grade)
 
-`src/cover.rs` implements two idle-time cover modes — `Balanced` (~200 ms
-cadence) and `Stealth` (~50 ms cadence) — that send `TYPE=Data` packets of
-random bytes (never Noise-sealed) when the session is otherwise idle; the
-receiver drops them because they fail to decrypt.
+`src/cover.rs` implements two idle-time cover modes — `Balanced`
+(120–280 ms jittered interval) and `Stealth` (30–70 ms jittered interval) —
+that send `TYPE=Data` packets of random bytes (never Noise-sealed) when the
+session is otherwise idle; the receiver drops them because they fail to
+decrypt.
 
 Measured by `examples/cover_measurement.rs` against the real encoding path
 (not estimated):
@@ -230,17 +231,18 @@ Measured by `examples/cover_measurement.rs` against the real encoding path
 | Cover, `Balanced` | 24–520 bytes (uniform per packet) |
 | Cover, `Stealth` | 24–264 bytes (uniform per packet) |
 
-The cover payload length is randomized (not a fixed 64 bytes, which earlier
-code used and which made every cover packet the exact same size — trivially
-distinguishable by a passive size-frequency observer from both the
-differently-sized-but-also-fixed ACK and the naturally variable DATA
-fragments). The current range overlaps plausible real sizes but was chosen
-by hand, not fit to any measured application traffic distribution — an
-observer with enough samples can likely still separate cover's uniform
-distribution from real traffic's actual one. Timing is unchanged: fixed
-50 ms / 200 ms cadence, not measured or randomized here. Battery-cost
-percentages from older drafts remain **unmeasured fiction** and revoked —
-nothing in this project measures power draw.
+Both the payload length and the inter-packet interval are now randomized
+per packet, rather than the fixed 64-byte / exactly-200ms-or-50ms cadence
+earlier code used — a fixed value on either axis is a distinguishing
+signal by itself (constant size vs. real traffic's variable size; constant
+period vs. real traffic's irregular timing, detectable even with simple
+inter-arrival-time analysis). The current ranges overlap plausible real
+values but were chosen by hand, not fit to any measured application
+traffic distribution — a patient observer with enough samples can likely
+still separate cover's two independent uniform distributions from
+whatever real traffic's actual (non-uniform, correlated) distributions
+are. Battery-cost percentages from older drafts remain **unmeasured
+fiction** and revoked — nothing in this project measures power draw.
 
 ---
 

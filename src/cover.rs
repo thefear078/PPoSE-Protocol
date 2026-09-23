@@ -27,12 +27,22 @@ pub enum CoverMode {
 }
 
 impl CoverMode {
-    /// Idle interval between cover packets.
-    pub fn interval(self) -> Option<Duration> {
+    /// Inclusive range the idle interval before the next cover packet is
+    /// drawn from (uniformly, per packet — see
+    /// `UdpSession::schedule_next_cover`), or `None` if cover is off.
+    ///
+    /// A single fixed interval (v0.4 used exactly 200 ms / 50 ms) makes
+    /// cover cadence a pure periodic signal an observer can pick out with
+    /// simple inter-arrival-time analysis, independent of the size
+    /// randomization above. Jittering the interval is, like the size
+    /// range, a partial mitigation — real traffic's timing isn't uniform
+    /// either, it's whatever the application actually does — not a fix
+    /// against a patient statistical observer.
+    pub fn interval_range(self) -> Option<(Duration, Duration)> {
         match self {
             Self::Off => None,
-            Self::Balanced => Some(Duration::from_millis(200)),
-            Self::Stealth => Some(Duration::from_millis(50)),
+            Self::Balanced => Some((Duration::from_millis(120), Duration::from_millis(280))),
+            Self::Stealth => Some((Duration::from_millis(30), Duration::from_millis(70))),
         }
     }
 
@@ -70,12 +80,20 @@ mod tests {
             );
         }
         assert_eq!(CoverMode::Off.payload_len_range(), (0, 0));
-        assert_eq!(CoverMode::Off.interval(), None);
+        assert_eq!(CoverMode::Off.interval_range(), None);
+    }
+
+    #[test]
+    fn interval_ranges_are_well_formed() {
+        for mode in [CoverMode::Balanced, CoverMode::Stealth] {
+            let (min, max) = mode.interval_range().unwrap();
+            assert!(min <= max, "{mode:?} interval range must be non-empty");
+        }
     }
 
     #[test]
     fn active_modes_have_an_interval() {
-        assert!(CoverMode::Balanced.interval().is_some());
-        assert!(CoverMode::Stealth.interval().is_some());
+        assert!(CoverMode::Balanced.interval_range().is_some());
+        assert!(CoverMode::Stealth.interval_range().is_some());
     }
 }

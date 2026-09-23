@@ -130,7 +130,7 @@ No identity hashes in the clear. Byte workbook: [docs/PACKET.md](docs/PACKET.md)
 | **3** | IPv4 forwarder + replay window | yes (not anonymous) |
 | **4** | Nested hops: specified PND (explicitly not Sphinx) | yes |
 | **5** | Token rendezvous (collusion documented, not solved) | yes |
-| **6** | Cover datagrams (size measured, randomized; timing still unmeasured) | yes |
+| **6** | Cover datagrams (size measured + randomized; interval jittered, not measured against real traffic) | yes |
 | **6.5** | Invitation Web-of-Trust admission (Ed25519 chains, local per-issuer cap) | yes (not a Sybil defense) |
 | **7** | External review / mixnet / GPA evaluation | no |
 

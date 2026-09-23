@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `NoiseSession::pin_remote` (`src/crypto/noise.rs`) now uses `subtle::ConstantTimeEq` instead of `!=`; defensive hygiene rather than a fix for an exploitable leak, since both sides were already public key material
 - `TrustStore::trust_depth` (`src/admission.rs`) no longer re-runs Ed25519 verification on every stored invitation for every query; only the cheap time window is rechecked, since `ingest` already verifies once before storing and invitations are immutable afterward
 - Cover packets were a fixed 72 bytes on the wire regardless of mode (`src/cover.rs`'s 64-byte constant + 8-byte outer header), contradicting the module's own claim of being size-indistinguishable from real traffic; `CoverMode::payload_len_range` now gives a per-packet randomized range instead. Still a hand-picked range, not fit to measured real traffic — noted as open work in `CONTRIBUTING.md`.
+- Cover packets also fired at an exact fixed cadence (200ms / 50ms), a pure periodic signal on its own regardless of the size fix; `CoverMode::interval_range` + `UdpSession::schedule_next_cover` now jitter the interval per packet the same way payload length is randomized. Same caveat: a hand-picked range, not measured against real traffic timing.
 
 ### Changed
 

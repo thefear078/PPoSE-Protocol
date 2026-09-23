@@ -126,7 +126,7 @@ pub struct UdpSession {
     arq: Arq,
     drop_data: u32,
     cover: CoverMode,
-    last_cover: Instant,
+    next_cover_at: Instant,
 }
 
 impl UdpSession {
@@ -165,7 +165,7 @@ impl UdpSession {
             arq: Arq::new(),
             drop_data: 0,
             cover: CoverMode::Off,
-            last_cover: Instant::now(),
+            next_cover_at: Instant::now(),
         };
 
         let mut buf = [0u8; MAX_DATAGRAM];
@@ -259,7 +259,7 @@ impl UdpSession {
             arq: Arq::new(),
             drop_data: 0,
             cover: CoverMode::Off,
-            last_cover: Instant::now(),
+            next_cover_at: Instant::now(),
         };
         if let Some((hops, dest)) = outbound_onion {
             sess.set_outbound_onion(hops, dest)?;
@@ -300,7 +300,7 @@ impl UdpSession {
     /// Enable cover datagrams on idle.
     pub fn set_cover(&mut self, mode: CoverMode) {
         self.cover = mode;
-        self.last_cover = Instant::now();
+        self.next_cover_at = self.schedule_next_cover(Instant::now());
     }
 
     /// Queue and send an application message (fragmented + ARQ).
@@ -399,14 +399,14 @@ impl UdpSession {
     }
 
     fn maybe_cover(&mut self) -> Result<(), SessionError> {
-        let Some(interval) = self.cover.interval() else {
-            return Ok(());
-        };
-        let now = Instant::now();
-        if now.saturating_duration_since(self.last_cover) < interval {
+        if self.cover.interval_range().is_none() {
             return Ok(());
         }
-        self.last_cover = now;
+        let now = Instant::now();
+        if now < self.next_cover_at {
+            return Ok(());
+        }
+        self.next_cover_at = self.schedule_next_cover(now);
         let (min, max) = self.cover.payload_len_range();
         let n = if max > min {
             min + (OsRng.next_u32() as usize % (max - min))
@@ -416,6 +416,25 @@ impl UdpSession {
         let mut body = vec![0u8; n];
         OsRng.fill_bytes(&mut body);
         self.send_inner(PacketType::Data, &body)
+    }
+
+    /// Pick the next cover-packet deadline: `from` plus a duration drawn
+    /// uniformly from `self.cover`'s interval range (a fixed interval would
+    /// be a pure periodic signal — see `CoverMode::interval_range`'s docs).
+    /// Returns `from` unchanged if cover is off; callers only consult this
+    /// deadline after already checking `interval_range().is_some()`.
+    fn schedule_next_cover(&self, from: Instant) -> Instant {
+        let Some((min, max)) = self.cover.interval_range() else {
+            return from;
+        };
+        let min_ms = min.as_millis() as u64;
+        let span_ms = (max.as_millis() as u64).saturating_sub(min_ms);
+        let jitter_ms = if span_ms == 0 {
+            0
+        } else {
+            OsRng.next_u64() % span_ms
+        };
+        from + Duration::from_millis(min_ms + jitter_ms)
     }
 
     fn flush(&mut self) -> Result<(), SessionError> {
