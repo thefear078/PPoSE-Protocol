@@ -27,7 +27,7 @@ PPoSE explores encrypted peer-to-peer datagrams with an optional future onion-fo
 | ARQ + fragments | Sphinx (we implemented PND instead) |
 | IPv4 forwarder + PND onion hops | Blind RS independence proofs |
 | Token rendezvous | Sybil-hard admission |
-| Cover datagrams (unmeasured) | Bug bounty / audit |
+| Cover datagrams (size + interval measured/randomized, §8) | Bug bounty / audit |
 | Invitation Web-of-Trust admission (Ed25519 chains) | Network-wide Sybil resistance |
 
 ---
@@ -40,7 +40,7 @@ Implemented now:
                  ↘ optional TYPE=Forward IPv4 wrap (relay sees dest)
                  ↘ optional TYPE=Onion PND nested hops (XChaCha20-Poly1305, not Sphinx)
                  ↘ optional TYPE=Rendezvous token discovery (collusion not solved)
-                 ↘ optional TYPE=Data cover datagrams (unmeasured)
+                 ↘ optional TYPE=Data cover datagrams (size/interval randomized, see §8)
   Admission: separate Ed25519 Invitation Web-of-Trust (src/admission.rs,
              not on the wire path above — a local policy gate, not a
              Sybil defense; see §7)
@@ -289,7 +289,7 @@ See README. Spec versions: `0.3-DRAFT` (this) → `1.0` only after interop vecto
 |---|---|---|
 | Noise | XX handshake | We are not inventing a new handshake |
 | Sphinx / HORNET | Onion packet format | Not implemented — we ship PND layered AEAD instead (§4.5), explicitly not Sphinx |
-| Loopix / Nym | Cover / mixing | Cover datagrams implemented (unmeasured, §8); no mixing/batching |
+| Loopix / Nym | Cover / mixing | Cover datagrams implemented and measured (§8); no mixing/batching |
 | Cwtch / Briar | Invitation trust | Implemented as signed Ed25519 chains (§7) — still not a cryptographic Sybil defense |
 | Tor | GPA discussion | We make **weaker** claims |
 
