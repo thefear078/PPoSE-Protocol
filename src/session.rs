@@ -336,10 +336,7 @@ impl UdpSession {
             match recv_raw(&self.sock) {
                 Err(e)
                     if e.kind() == io::ErrorKind::WouldBlock
-                        || e.kind() == io::ErrorKind::TimedOut =>
-                {
-                    continue;
-                }
+                        || e.kind() == io::ErrorKind::TimedOut => {}
                 Err(e) => return Err(e.into()),
                 Ok((raw, from)) => {
                     if from != self.next_hop {
@@ -389,10 +386,7 @@ impl UdpSession {
             match recv_raw(&self.sock) {
                 Err(e)
                     if e.kind() == io::ErrorKind::WouldBlock
-                        || e.kind() == io::ErrorKind::TimedOut =>
-                {
-                    continue;
-                }
+                        || e.kind() == io::ErrorKind::TimedOut => {}
                 Err(e) => return Err(e.into()),
                 Ok((raw, from)) => {
                     if from != self.next_hop {
@@ -450,9 +444,8 @@ impl UdpSession {
         match ty {
             PacketType::Data => {
                 let mut out = vec![0u8; body.len()];
-                let n = match self.noise.open(&body, &mut out) {
-                    Ok(n) => n,
-                    Err(_) => return Ok(()),
+                let Ok(n) = self.noise.open(&body, &mut out) else {
+                    return Ok(());
                 };
                 out.truncate(n);
                 if let Some(ack) = self.arq.ingest(&out)? {

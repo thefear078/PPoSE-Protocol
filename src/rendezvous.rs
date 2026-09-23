@@ -54,9 +54,8 @@ impl RendezvousService {
             }
             Err(e) => return Err(e),
         };
-        let (ty, _, body) = match decode_outer(&buf[..n]) {
-            Ok(v) => v,
-            Err(_) => return Ok(false),
+        let Ok((ty, _, body)) = decode_outer(&buf[..n]) else {
+            return Ok(false);
         };
         if ty != PacketType::Rendezvous || body.is_empty() {
             return Ok(false);
@@ -84,9 +83,8 @@ impl RendezvousService {
                     reply.extend_from_slice(&v4.ip().octets());
                     reply.extend_from_slice(&v4.port().to_be_bytes());
                 }
-                let pkt = match encode_datagram(PacketType::Rendezvous, &reply) {
-                    Ok(p) => p,
-                    Err(_) => return Ok(false),
+                let Ok(pkt) = encode_datagram(PacketType::Rendezvous, &reply) else {
+                    return Ok(false);
                 };
                 self.sock.send_to(&pkt, from)?;
                 Ok(true)
