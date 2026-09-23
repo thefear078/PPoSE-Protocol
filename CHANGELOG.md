@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `ReplayCache::accept` (`src/network/replay.rs`) did a full `O(n)` sweep on every packet; duplicate detection is now checked per-key (correct on every call) and the reclaiming sweep is throttled to every 64 calls or when at capacity
 - Onion relay (`src/onion.rs::OnionRelay::step`) now drops a peeled layer whose next-hop address is the relay's own bound address, preventing a trivial single-hop loop
+- `NoiseSession::pin_remote` (`src/crypto/noise.rs`) now uses `subtle::ConstantTimeEq` instead of `!=`; defensive hygiene rather than a fix for an exploitable leak, since both sides were already public key material
 
 ### Changed
 

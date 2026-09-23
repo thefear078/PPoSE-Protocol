@@ -67,15 +67,15 @@ themselves (treated as trusted, widely-used dependencies).
    invitations answering many queries per second would want to cache
    verification results (an invitation, once verified, only needs
    re-checking for expiry, not signature validity, until it's replaced).
-3. **Open, low severity.** `NoiseSession::pin_remote` uses `!=` on
-   `[u8; 32]`, not a constant-time comparison. (`src/crypto/noise.rs`.) Both
-   sides of that comparison are public key material — the attacker already
-   knows the value they sent, and the expected value is the operator's own
-   configuration, not a secret being brute-forced — so this isn't a
-   practical timing side channel. Flagging it anyway because "does this
-   key-shaped comparison use constant time" is a standard checklist item
-   and a future refactor that reuses this pattern for something secret
-   should not copy it uncritically.
+3. **Fixed (defensive hygiene, not an exploitable leak).**
+   `NoiseSession::pin_remote` used `!=` on `[u8; 32]`, not a constant-time
+   comparison. (`src/crypto/noise.rs`.) Both sides of that comparison were
+   already public key material — the attacker knows the value they sent,
+   and the expected value is the operator's own configuration, not a
+   secret being brute-forced — so this was never a practical timing side
+   channel. Switched to `subtle::ConstantTimeEq` anyway so the pattern is
+   safe to copy if a future refactor reuses it for something that *is*
+   secret.
 4. **Fixed.** Onion relay forwarded a peeled layer's destination via plain
    `UdpSocket::send_to` with no check that it wasn't the relay's own bound
    address — a malformed or malicious route could loop a relay back into

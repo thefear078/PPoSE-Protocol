@@ -360,6 +360,7 @@ dependencies = [
  "ed25519-dalek",
  "rand_core",
  "snow",
+ "subtle",
  "thiserror",
  "x25519-dalek",
 ]

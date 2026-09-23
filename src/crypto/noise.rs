@@ -2,6 +2,7 @@
 
 use snow::params::NoiseParams;
 use snow::Builder;
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 
 use crate::crypto::keys::IdentitySecret;
@@ -132,12 +133,17 @@ impl NoiseSession {
     }
 
     /// Return error if remote static is not `expected`.
+    ///
+    /// Both sides of this comparison are public key material, not secrets —
+    /// the constant-time check is defensive hygiene, not a fix for an
+    /// exploitable timing leak (see `docs/SECURITY_REVIEW.md`).
     pub fn pin_remote(&self, expected: &[u8; 32]) -> Result<(), NoiseError> {
         let got = self.remote_static()?;
-        if &got != expected {
-            return Err(NoiseError::KeyMismatch);
+        if got.ct_eq(expected).into() {
+            Ok(())
+        } else {
+            Err(NoiseError::KeyMismatch)
         }
-        Ok(())
     }
 }
 
