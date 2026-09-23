@@ -42,7 +42,7 @@ PPoSE is a **research prototype** with a running reference crate:
 | Nested hops | PND layered AEAD | **Implemented** — **not Sphinx**, hops see next IP |
 | Discovery | Token rendezvous | **Implemented** — collusion not solved |
 | Cover traffic | TYPE=Data random bodies, randomized size | **Implemented** — size measured (§8), timing not, not mixnet |
-| Admission | Invitation Web-of-Trust (Ed25519 signed, chain-depth) | **Implemented** — policy layer, not a Sybil defense |
+| Admission | Invitation Web-of-Trust (Ed25519 signed, chain-depth) | **Implemented**, wired into `ppose listen` — policy layer, not a Sybil defense |
 
 If you need production anonymity, use battle-tested systems (Tor, I2P, Nym, SimpleX, …). This repo is for a testable design, not a Tor competitor.
 
@@ -82,6 +82,14 @@ cargo run --bin ppose -- connect 127.0.0.1:9000
 cargo run --bin ppose -- keygen                              # note "secret" and "public"
 cargo run --bin ppose -- listen 127.0.0.1:9000 --key <secret hex>
 cargo run --bin ppose -- connect 127.0.0.1:9000 --pin <public hex>
+
+# gate listen with Invitation Web-of-Trust admission (not a Sybil defense)
+cargo run --bin ppose -- keygen-invite                        # a trusted root
+cargo run --bin ppose -- keygen                               # the peer you'll vouch for
+cargo run --bin ppose -- invite <peer public hex> --signer <root secret hex>
+cargo run --bin ppose -- listen 127.0.0.1:9000 \
+  --admit-root <root public hex> --admit-invite <invite hex> --admit-depth 1
+cargo run --bin ppose -- connect 127.0.0.1:9000 --key <peer secret hex>
 
 # optional forwarder (sees destination addresses)
 cargo run --example relay_node -- 127.0.0.1:8000
@@ -131,7 +139,7 @@ No identity hashes in the clear. Byte workbook: [docs/PACKET.md](docs/PACKET.md)
 | **4** | Nested hops: specified PND (explicitly not Sphinx) | yes |
 | **5** | Token rendezvous (collusion documented, not solved) | yes |
 | **6** | Cover datagrams (size measured + randomized; interval jittered, not measured against real traffic) | yes |
-| **6.5** | Invitation Web-of-Trust admission (Ed25519 chains, local per-issuer cap) | yes (not a Sybil defense) |
+| **6.5** | Invitation Web-of-Trust admission (Ed25519 chains, local per-issuer cap), wired into `ppose listen --admit-root` | yes (not a Sybil defense) |
 | **7** | External review / mixnet / GPA evaluation | no |
 
 ---

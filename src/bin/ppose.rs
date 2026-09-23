@@ -4,7 +4,13 @@ use std::env;
 use std::net::UdpSocket;
 use std::process;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
+use ppose::admission::Invitation;
+use ppose::admission::InviteSigningKey;
+use ppose::admission::InviteVerifyingKey;
+use ppose::admission::TrustStore;
 use ppose::crypto::keys::IdentitySecret;
 use ppose::crypto::keys::PublicIdentity;
 use ppose::network::udp::bind_loopback;
@@ -42,10 +48,48 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("fp      {}", hex(&sk.public().fingerprint()));
             Ok(())
         }
+        "keygen-invite" => {
+            let sk = InviteSigningKey::generate();
+            println!("secret  {}", hex(&sk.to_bytes()));
+            println!("public  {}", hex(&sk.public().as_bytes()));
+            Ok(())
+        }
+        "invite" => {
+            let mut rest: Vec<String> = args.collect();
+            let ttl = take_flag(&mut rest, "--ttl-secs")?
+                .map(|v| v.parse::<u64>())
+                .transpose()
+                .map_err(|_| "--ttl-secs must be a number")?
+                .unwrap_or(86_400);
+            let signer_hex = take_flag(&mut rest, "--signer")?
+                .ok_or("invite requires --signer <hex32 keygen-invite secret>")?;
+            if rest.is_empty() {
+                return Err(
+                    "usage: ppose invite <subject hex32> --signer <hex32> [--ttl-secs N]".into(),
+                );
+            }
+            let subject = PublicIdentity::from_bytes(parse_hex32(&rest.remove(0))?);
+            let signer = InviteSigningKey::from_bytes(parse_hex32(&signer_hex)?);
+            let now = unix_now();
+            let invite = signer.issue(&subject, now, ttl);
+            println!("root     {}", hex(&signer.public().as_bytes()));
+            println!("subject  {}", hex(&subject.as_bytes()));
+            println!("issued   {now}");
+            println!("expires  {}", now + ttl);
+            println!("invite   {}", hex(&invite.encode()));
+            Ok(())
+        }
         "listen" => {
             let mut rest: Vec<String> = args.collect();
             let pin = take_pin_flag(&mut rest, "--pin")?;
             let id = take_key_flag(&mut rest, "--key")?.unwrap_or_else(IdentitySecret::generate);
+            let admit_roots = take_all_flag(&mut rest, "--admit-root");
+            let admit_invites = take_all_flag(&mut rest, "--admit-invite");
+            let admit_depth: u8 = take_flag(&mut rest, "--admit-depth")?
+                .map(|v| v.parse())
+                .transpose()
+                .map_err(|_| "--admit-depth must be a number")?
+                .unwrap_or(0);
             let bind = if rest.is_empty() {
                 "127.0.0.1:0".to_string()
             } else {
@@ -59,6 +103,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("pin   expecting pinned remote static key");
             }
             let mut s = UdpSession::accept_responder_pinned(sock, &id, None, pin)?;
+            if !admit_roots.is_empty() {
+                let mut store = TrustStore::new();
+                for r in &admit_roots {
+                    store.add_root(InviteVerifyingKey::from_bytes(parse_hex32(r)?)?);
+                }
+                let now = unix_now();
+                for inv in &admit_invites {
+                    store.ingest(Invitation::decode(&parse_hex(inv)?)?, now)?;
+                }
+                let remote = s.remote_static()?;
+                if !store.is_admitted(&remote, admit_depth, now) {
+                    return Err(format!(
+                        "remote identity {} not admitted (Web-of-Trust gate, depth {admit_depth})",
+                        hex(&remote)
+                    )
+                    .into());
+                }
+                println!("admit remote identity is admitted");
+            }
             let msg = s.recv(Duration::from_secs(30))?;
             println!("recv {}", String::from_utf8_lossy(&msg));
             s.send(b"ack")?;
@@ -148,7 +211,10 @@ fn print_help() {
         "ppose {CRATE_VERSION} — research prototype (not an anonymity network)\n\n\
          Commands:\n\
            keygen\n\
+           keygen-invite\n\
+           invite <subject hex32> --signer <hex32> [--ttl-secs N]\n\
            listen [bind] [--pin <hex32>] [--key <hex32>]\n\
+             [--admit-root <hex32>]... [--admit-invite <hex288>]... [--admit-depth N]\n\
            connect <peer> [--pin <hex32>] [--key <hex32>]\n\
            relay [bind]              cleartext dest forwarder\n\
            onion-relay [bind]        PND hop (not Sphinx)\n\
@@ -161,7 +227,17 @@ fn print_help() {
          fails closed on an unexpected key instead of trust-on-first-use.\n\
          --key loads a persistent local identity (64 hex chars, from this\n\
          node's own `keygen` \"secret\" line) instead of a fresh random one\n\
-         each run — needed so a peer's --pin stays valid across restarts.\n"
+         each run — needed so a peer's --pin stays valid across restarts.\n\n\
+         Admission (Invitation Web-of-Trust, src/admission.rs — a local\n\
+         policy gate, NOT a Sybil defense; see docs/SECURITY_REVIEW.md):\n\
+         --admit-root registers a trusted `keygen-invite` public key\n\
+         (repeatable). With no --admit-root given, listen accepts anyone,\n\
+         same as before. --admit-invite loads an `invite`-command output\n\
+         (repeatable) so chains longer than --admit-depth 0 can resolve.\n\
+         A connecting peer whose Noise static identity isn't reachable\n\
+         from a trusted root within --admit-depth hops is rejected after\n\
+         the handshake completes (their identity is already authenticated\n\
+         at that point — this only decides admission, not authenticity).\n"
     );
 }
 
@@ -203,21 +279,46 @@ fn take_flag(
         return Ok(None);
     };
     if pos + 1 >= args.len() {
-        return Err(format!("{flag} requires a 64-hex-char value").into());
+        return Err(format!("{flag} requires a value").into());
     }
     args.remove(pos);
     Ok(Some(args.remove(pos)))
 }
 
+/// Remove every `flag <value>` pair from `args`, in the order encountered.
+/// Unlike [`take_flag`] this never errors: a trailing `flag` with no value
+/// is simply left in `args` for the caller's own "unexpected argument"
+/// handling (none of the current commands have one, so it's effectively
+/// ignored — acceptable for this CLI's scope).
+fn take_all_flag(args: &mut Vec<String>, flag: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == flag && i + 1 < args.len() {
+            args.remove(i);
+            out.push(args.remove(i));
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 fn parse_hex32(s: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    if s.len() != 64 {
-        return Err(format!("expected 64 hex chars, got {}", s.len()).into());
+    let bytes = parse_hex(s)?;
+    bytes
+        .try_into()
+        .map_err(|v: Vec<u8>| format!("expected 32 bytes (64 hex chars), got {}", v.len()).into())
+}
+
+fn parse_hex(s: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    if s.len() % 2 != 0 {
+        return Err(format!("expected an even number of hex chars, got {}", s.len()).into());
     }
-    let mut out = [0u8; 32];
-    for (i, chunk) in out.iter_mut().enumerate() {
-        *chunk = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)?;
-    }
-    Ok(out)
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(Into::into))
+        .collect()
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -226,4 +327,11 @@ fn hex(bytes: &[u8]) -> String {
         let _ = write!(out, "{b:02x}");
         out
     })
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
