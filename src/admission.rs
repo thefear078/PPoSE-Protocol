@@ -177,11 +177,12 @@ impl Invitation {
     /// Returns [`AdmissionError::NotYetValid`], [`AdmissionError::Expired`],
     /// or [`AdmissionError::BadSignature`].
     pub fn verify(&self, now: u64) -> Result<(), AdmissionError> {
-        if now < self.issued_at {
-            return Err(AdmissionError::NotYetValid);
-        }
-        if now >= self.expires_at {
-            return Err(AdmissionError::Expired);
+        if !self.time_valid(now) {
+            return Err(if now < self.issued_at {
+                AdmissionError::NotYetValid
+            } else {
+                AdmissionError::Expired
+            });
         }
         let issuer_bytes = self.issuer.as_bytes();
         let payload = signing_payload(
@@ -195,6 +196,16 @@ impl Invitation {
             .key
             .verify(&payload, &sig)
             .map_err(|_| AdmissionError::BadSignature)
+    }
+
+    /// Cheap `[issued_at, expires_at)` window check with **no signature
+    /// verification**. Only safe to rely on for an invitation whose
+    /// signature was already checked once (e.g. anything that went through
+    /// [`TrustStore::ingest`], which calls [`verify`](Self::verify) before
+    /// storing it — `Invitation`'s fields are otherwise immutable after
+    /// that point).
+    fn time_valid(&self, now: u64) -> bool {
+        now >= self.issued_at && now < self.expires_at
     }
 
     /// Issuer that vouched for [`subject`](Self::subject).
@@ -333,7 +344,10 @@ impl TrustStore {
                     continue;
                 };
                 for invite in subjects.values() {
-                    if invite.verify(now).is_err() {
+                    // Signature was already checked once by `ingest`;
+                    // invitations are immutable afterward, so only the
+                    // (cheap) time window needs rechecking per query.
+                    if !invite.time_valid(now) {
                         continue;
                     }
                     let s = invite.subject();

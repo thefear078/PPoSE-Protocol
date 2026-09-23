@@ -60,13 +60,13 @@ themselves (treated as trusted, widely-used dependencies).
    only every `SWEEP_EVERY` (64) calls or when `cap` is reached — see
    `ttl_correctness_survives_throttled_sweep` and
    `sweep_reclaims_stale_entries_over_many_calls` in that module's tests.
-2. **Open.** `TrustStore` re-verifies every stored invitation's Ed25519
-   signature on every `trust_depth` query. (`src/admission.rs`.) Fine at the
-   scale this was designed for (a local policy gate consulted per admission
-   decision, not a hot per-packet path), but a node with many ingested
-   invitations answering many queries per second would want to cache
-   verification results (an invitation, once verified, only needs
-   re-checking for expiry, not signature validity, until it's replaced).
+2. **Fixed.** `TrustStore` re-verified every stored invitation's Ed25519
+   signature on every `trust_depth` query. (`src/admission.rs`.) Since
+   `ingest` already verifies (signature + time window) before an invitation
+   is stored, and `Invitation`'s fields are private and never mutated
+   afterward, `trust_depth` now only re-checks the cheap time window via
+   `Invitation::time_valid` and relies on the one-time signature check from
+   ingestion — no repeated Ed25519 verification per query.
 3. **Fixed (defensive hygiene, not an exploitable leak).**
    `NoiseSession::pin_remote` used `!=` on `[u8; 32]`, not a constant-time
    comparison. (`src/crypto/noise.rs`.) Both sides of that comparison were
