@@ -1,10 +1,10 @@
 [package]
 name = "ppose"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["The Fear <https://github.com/thefear078>"]
-description = "PPoSE — research prototype: Noise XX, ARQ, onion hops (not Sphinx), rendezvous"
+description = "PPoSE — research prototype: Noise XX, ARQ, onion hops (not Sphinx), rendezvous, invitation web-of-trust"
 license = "MIT"
 repository = "https://github.com/thefear078/PPoSE-Protocol"
 homepage = "https://github.com/thefear078/PPoSE-Protocol"

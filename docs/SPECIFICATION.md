@@ -1,6 +1,6 @@
 # PPoSE Protocol Specification
 
-## Version 0.4-DRAFT
+## Version 0.5-DRAFT
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -9,7 +9,7 @@
 │  are revoked. See docs/THREAT_MODEL.md                     │
 │  License: MIT                                              │
 │  Target: Rust                                              │
-│  Updated: 2026-09-23                                       │
+│  Updated: 2026-09-24                                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -21,7 +21,7 @@
 
 PPoSE explores encrypted peer-to-peer datagrams with an optional future onion-forwarding layer.
 
-| In scope for v0.4 code | Out of scope |
+| In scope for v0.5 code | Out of scope |
 |---|---|
 | X25519 + Noise XX + remote pin | GPA / mixnet |
 | ARQ + fragments | Sphinx (we implemented PND instead) |
@@ -169,7 +169,8 @@ Selective-repeat ARQ and fragmentation run **only on endpoints**.
 | Window | 32 packets |
 | ACK | inner kind 0x02 after each accepted DATA |
 | Retransmit | 200 ms, 5 attempts then give up |
-| Fragment payload | ≤ 1024 bytes; `frag_total` ≤ 255 |
+| Fragment payload | ≤ 1024 bytes on direct / relay / 1-hop paths, 1167 − 86·hops on longer onion paths ([PACKET.md](PACKET.md)); `frag_total` ≤ 255 |
+| Pending reassemblies | ≤ 64 distinct `frag_id`s, oldest evicted first |
 
 Inner layouts: [PACKET.md](PACKET.md).
 
@@ -275,12 +276,19 @@ fiction** and revoked — nothing in this project measures power draw.
 | Path via IPv4 forwarder | yes |
 | Outer header rejects wrong magic/version | yes |
 | Replay cache rejects duplicates | yes |
+| Remote static pinning (accept / reject) | yes |
+| Two-hop PND onion, small and multi-fragment messages | yes |
+| Rendezvous register / lookup | yes |
+| Invitation sign / verify / tamper / expiry / chain depth / issuer cap | yes |
+| Real message survives interleaved cover traffic | yes |
+| Replay cache, reassembly table, rendezvous table stay bounded | yes |
+| Every wire parser: randomized input of every length 0–200 B, no panic | yes |
 
 ---
 
 ## 11. Roadmap
 
-See README. Spec versions: `0.3-DRAFT` (this) → `1.0` only after interop vectors + external review.
+See README. Spec versions: `0.5-DRAFT` (this) → `1.0` only after interop vectors + external review.
 
 ---
 

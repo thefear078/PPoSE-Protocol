@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License: MIT" /></a>
-  <a href="docs/SPECIFICATION.md"><img src="https://img.shields.io/badge/spec-v0.4--DRAFT-orange.svg" alt="Spec v0.4 DRAFT" /></a>
+  <a href="docs/SPECIFICATION.md"><img src="https://img.shields.io/badge/spec-v0.5--DRAFT-orange.svg" alt="Spec v0.5 DRAFT" /></a>
   <a href="#status"><img src="https://img.shields.io/badge/status-research%20prototype-lightgrey.svg" alt="Status" /></a>
   <a href="https://github.com/thefear078/PPoSE-Protocol/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/thefear078/PPoSE-Protocol/ci.yml?branch=main" alt="CI" /></a>
   <img src="https://img.shields.io/badge/lang-Rust-dea584.svg" alt="Rust" />
@@ -101,7 +101,7 @@ cargo run --example admission_demo
 cargo run --example cover_measurement
 ```
 
-Tests cover: handshake, ARQ loss recovery, 2 kB fragmentation, Alice↔Bob through a relay.
+Tests cover: handshake, key pinning, ARQ loss recovery, fragmentation, relay and two-hop onion paths (including multi-fragment messages), rendezvous, invitation web-of-trust, cover traffic, bounded state tables, and randomized malformed input for every wire parser. Full list: [SPECIFICATION.md §10](docs/SPECIFICATION.md#10-testing-requirements).
 
 ### Wire envelope (cleartext outer header = 8 bytes)
 

@@ -1,4 +1,4 @@
-# Threat Model (v0.4-DRAFT)
+# Threat Model (v0.5-DRAFT)
 
 **Status:** living document. If README and this file disagree, this file wins for security claims.
 

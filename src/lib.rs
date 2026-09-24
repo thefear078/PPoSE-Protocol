@@ -16,7 +16,7 @@ pub mod reliability;
 pub mod rendezvous;
 pub mod session;
 
-/// Wire version byte (`VER` field). v0.3 uses `0x03` (same envelope as 0.2).
+/// Wire version byte (`VER` field). `0x03` since v0.3; unchanged through v0.5.
 pub const PROTOCOL_VERSION: u8 = 0x03;
 
 /// Magic bytes identifying PPoSE datagrams.

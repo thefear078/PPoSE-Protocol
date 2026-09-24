@@ -3,7 +3,7 @@
 **This is not the external review roadmap Phase 7 asks for.** Phase 7 in
 [README.md](../README.md#roadmap) requires independent auditors; nothing
 below substitutes for that. This is a documented internal pass over the
-`v0.4` + Invitation Web-of-Trust code — what was checked, what looks sound,
+`v0.4` codebase plus everything added for `v0.5` — what was checked, what looks sound,
 and what is worth a human's attention before anyone relies on this for
 anything beyond research. See [THREAT_MODEL.md](THREAT_MODEL.md) for the
 project's actual security claims; this document does not change any of
@@ -48,7 +48,7 @@ themselves (treated as trusted, widely-used dependencies).
   (a 32-byte token) that always fits `MAX_DATAGRAM` — both unreachable in
   practice, not just "shouldn't happen."
 
-## Findings (informational — none blocked current use as a research prototype; all five addressed as of this review)
+## Findings (informational — none blocked current use as a research prototype; all six addressed as of this review)
 
 1. **Fixed.** `ReplayCache::accept` ran a full `O(n)` `HashMap::retain` scan
    on *every* accepted packet (`src/network/replay.rs`, used by the IPv4
@@ -97,6 +97,22 @@ themselves (treated as trusted, widely-used dependencies).
    module's tests. Lower severity than the other four findings since it
    requires an authenticated peer, not an arbitrary stranger, but a genuine
    unbounded-memory path that had no test coverage before this.
+6. **Fixed (2026-09-24) — the most severe of the six.**
+   `RendezvousService`'s token table (`src/rendezvous.rs`) had the same
+   two problems as #1 and #5 combined: no cap on distinct tokens, and a
+   full `O(n)` `HashMap::retain` TTL sweep on *every* incoming packet.
+   Unlike #5, registration requires no authentication whatsoever — anyone
+   who can send the service a UDP packet can register an arbitrary 32-byte
+   token — so an unauthenticated stranger could grow memory without bound
+   *and* make each packet progressively more expensive to process. Now
+   capped at `DEFAULT_CAP` (4096) with FIFO eviction, the sweep throttled
+   to every `SWEEP_EVERY` (64) registrations or when at cap, and lookups
+   check their own entry's timestamp (`RendezvousService::lookup`) so a
+   throttled sweep can't cause a stale registration to be returned as
+   live. See `registration_table_stays_bounded` and
+   `expired_registration_not_returned_before_next_sweep`. Found by
+   checking whether the pattern behind #1 and #5 recurred anywhere else —
+   it did, in the one place with no authentication in front of it.
 
 ## What this review does not cover
 
