@@ -16,6 +16,15 @@ pub const DEFAULT_RETX: Duration = Duration::from_millis(200);
 /// Default give-up after this many sends (1 original + retries).
 pub const DEFAULT_MAX_ATTEMPTS: u8 = 5;
 
+/// Maximum number of distinct in-progress fragment reassemblies kept at
+/// once. Without a cap, a peer that has already completed the Noise
+/// handshake (this is endpoint state, never seen by a relay) could send
+/// DATA fragments across many distinct `frag_id`s and never complete any
+/// of them, growing `Arq::fragments` without bound — each entry can hold
+/// up to 255 payload-sized slots. Oldest-inserted entries are evicted once
+/// this cap is reached; see `Arq::on_data`.
+const MAX_PENDING_FRAGMENTS: usize = 64;
+
 /// ARQ errors.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ArqError {
@@ -52,6 +61,10 @@ pub struct Arq {
     recv_base: u32,
     recv_bits: u64,
     fragments: HashMap<u16, FragBuf>,
+    /// Insertion order of keys in `fragments`, for bounded FIFO eviction.
+    /// May contain stale entries for `frag_id`s already removed from
+    /// `fragments` (completed reassembly) — `on_data` tolerates that.
+    fragment_order: VecDeque<u16>,
     delivered: VecDeque<Vec<u8>>,
     pending_ack: bool,
     max_attempts: u8,
@@ -74,6 +87,7 @@ impl Arq {
             recv_base: 0,
             recv_bits: 0,
             fragments: HashMap::new(),
+            fragment_order: VecDeque::new(),
             delivered: VecDeque::new(),
             pending_ack: false,
             max_attempts: DEFAULT_MAX_ATTEMPTS,
@@ -227,10 +241,29 @@ impl Arq {
             self.delivered.push_back(payload);
             return;
         }
-        let buf = self.fragments.entry(frag_id).or_insert_with(|| FragBuf {
-            total,
-            parts: vec![None; total as usize],
-        });
+        if !self.fragments.contains_key(&frag_id) {
+            while self.fragments.len() >= MAX_PENDING_FRAGMENTS {
+                let Some(oldest) = self.fragment_order.pop_front() else {
+                    break;
+                };
+                // No-op if `oldest` already completed and was removed below;
+                // the loop keeps popping until an eviction actually frees a
+                // slot, or the order queue itself runs dry.
+                self.fragments.remove(&oldest);
+            }
+            self.fragment_order.push_back(frag_id);
+            self.fragments.insert(
+                frag_id,
+                FragBuf {
+                    total,
+                    parts: vec![None; total as usize],
+                },
+            );
+        }
+        let buf = self
+            .fragments
+            .get_mut(&frag_id)
+            .expect("just inserted or already present above");
         if buf.total != total || (index as usize) >= buf.parts.len() {
             return;
         }
@@ -241,6 +274,9 @@ impl Arq {
                 full.extend_from_slice(part);
             }
             self.fragments.remove(&frag_id);
+            if self.fragment_order.front() == Some(&frag_id) {
+                self.fragment_order.pop_front();
+            }
             self.delivered.push_back(full);
         }
     }
@@ -350,6 +386,28 @@ mod tests {
         a.ingest(&ack).unwrap();
         assert_eq!(b.pop_delivered().as_deref(), Some(&b"one"[..]));
         assert_eq!(a.unacked_len(), 0);
+    }
+
+    #[test]
+    fn fragment_reassembly_is_bounded() {
+        // A peer that already completed the Noise handshake (this is
+        // endpoint state, never seen by an unauthenticated stranger) could
+        // otherwise send DATA fragments across unboundedly many distinct
+        // frag_ids and never complete any of them. Confirms the fix: the
+        // reassembly table stays capped even after well over
+        // MAX_PENDING_FRAGMENTS distinct, never-completed fragments.
+        let mut b = Arq::new();
+        let total_frags: u32 = MAX_PENDING_FRAGMENTS as u32 + 20;
+        for frag_id in 0..total_frags {
+            let pt = encode_data(frag_id, frag_id as u16, 0, 2, b"never completed");
+            assert!(b.ingest(&pt).unwrap().is_some());
+        }
+        assert!(
+            b.fragments.len() <= MAX_PENDING_FRAGMENTS,
+            "fragment table must stay bounded, got {}",
+            b.fragments.len()
+        );
+        assert!(b.pop_delivered().is_none());
     }
 
     #[test]

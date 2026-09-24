@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `examples/cover_measurement.rs`: measures real ACK/DATA/cover wire sizes against the project's actual encoding + a live Noise session — replaces the "unmeasured" size claim in `docs/SPECIFICATION.md` §8 with real numbers
 - `tests/cover.rs`: first test coverage at all for `CoverMode`/`set_cover` — confirms a real message still delivers correctly with cover traffic interleaved (cover packets fail to decrypt and are silently dropped; `snow` only advances its receive nonce on success, so no desync)
 
+### Added (2026-09-24)
+
+- `tests/malformed_input.rs`: deterministic seeded randomized-input coverage (not real coverage-guided fuzzing) for every function that parses bytes straight off the wire — `decode_outer`, `decode_inner`, `decode_forward_body`, `peel_layer`, `Invitation::decode`, `InviteVerifyingKey::from_bytes`, `rendezvous::decode_reply` — across every length 0..=200 bytes. Closes the "not done" item `docs/SECURITY_REVIEW.md` flagged for itself.
+
+### Fixed (2026-09-24)
+
+- `Arq`'s fragment-reassembly table (`src/reliability/arq.rs`) had no cap on distinct in-progress `frag_id`s; an already-authenticated peer could grow it unboundedly by never completing any fragment. `MAX_PENDING_FRAGMENTS` (64) + FIFO eviction now bounds it. Finding #5 in `docs/SECURITY_REVIEW.md`, found by re-reading the reassembly code while writing the fuzz-lite tests above, not by the tests themselves.
+
 ### Fixed
 
 - `ReplayCache::accept` (`src/network/replay.rs`) did a full `O(n)` sweep on every packet; duplicate detection is now checked per-key (correct on every call) and the reclaiming sweep is throttled to every 64 calls or when at capacity

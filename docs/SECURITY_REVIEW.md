@@ -1,4 +1,4 @@
-# Internal security self-review (2026-09-23)
+# Internal security self-review (2026-09-23, updated 2026-09-24)
 
 **This is not the external review roadmap Phase 7 asks for.** Phase 7 in
 [README.md](../README.md#roadmap) requires independent auditors; nothing
@@ -48,7 +48,7 @@ themselves (treated as trusted, widely-used dependencies).
   (a 32-byte token) that always fits `MAX_DATAGRAM` — both unreachable in
   practice, not just "shouldn't happen."
 
-## Findings (informational — none blocked current use as a research prototype; all four addressed as of this review)
+## Findings (informational — none blocked current use as a research prototype; all five addressed as of this review)
 
 1. **Fixed.** `ReplayCache::accept` ran a full `O(n)` `HashMap::retain` scan
    on *every* accepted packet (`src/network/replay.rs`, used by the IPv4
@@ -86,11 +86,30 @@ themselves (treated as trusted, widely-used dependencies).
    broken normal local use. Operators exposing a public onion hop should
    still be aware this is "a dumb proxy, not anonymous" (§5.1) with no
    other destination sanity checking.
+5. **Fixed (2026-09-24).** `Arq`'s fragment-reassembly table
+   (`src/reliability/arq.rs`) had no cap: a peer that had already completed
+   the Noise handshake — this is endpoint state, never seen by an
+   unauthenticated stranger — could send DATA fragments across arbitrarily
+   many distinct `frag_id`s and never complete any of them, growing
+   `fragments: HashMap<u16, FragBuf>` without bound (each entry holds up to
+   255 payload-sized slots). `MAX_PENDING_FRAGMENTS` (64) plus a FIFO
+   eviction queue now caps it; see `fragment_reassembly_is_bounded` in that
+   module's tests. Lower severity than the other four findings since it
+   requires an authenticated peer, not an arbitrary stranger, but a genuine
+   unbounded-memory path that had no test coverage before this.
 
 ## What this review does not cover
 
-Formal protocol security proofs, GPA resistance, rendezvous
-operator-independence (§6 of the spec is still explicitly non-normative),
-and anything requiring dynamic analysis (fuzzing `decode_outer` /
-`decode_inner` / `Invitation::decode` against malformed input would be the
-natural next step — none of that was run here).
+Formal protocol security proofs, GPA resistance, and rendezvous
+operator-independence (§6 of the spec is still explicitly non-normative).
+
+`tests/malformed_input.rs` (added 2026-09-24) now exercises `decode_outer`,
+`decode_inner`, `decode_forward_body`, `peel_layer`, `Invitation::decode`,
+`InviteVerifyingKey::from_bytes`, and `rendezvous::decode_reply` against
+randomized inputs across every length from 0 to 200 bytes — the length/
+boundary space this review's first pass had checked only by reading the
+code, not by running anything against it. This is deterministic seeded
+randomized testing, not real coverage-guided fuzzing (no `cargo-fuzz` /
+`libFuzzer` corpus, no mutation from a seed corpus, no sanitizers); it
+would not necessarily find everything a real fuzzing campaign would, and
+finding #5 above was found by reading `Arq::on_data`, not by this testing.
