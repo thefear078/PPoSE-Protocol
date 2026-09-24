@@ -1,8 +1,10 @@
 //! PPoSE Nested Datagram (PND) — layered X25519 + XChaCha20-Poly1305.
 //!
-//! **This is not Sphinx** (Danezis–Goldberg). Each hop adds ~79 bytes, the
-//! next IPv4:port is in the *encrypted* layer (the hop itself sees the next
-//! address after peeling). Intermediate hops do not see the inner payload.
+//! **This is not Sphinx** (Danezis–Goldberg). Each hop adds 86 bytes on the
+//! wire ([`LAYER_OVERHEAD`] plus a fresh outer header); the session shrinks
+//! ARQ fragments to match. The next IPv4:port is in the *encrypted* layer
+//! (the hop itself sees the next address after peeling). Intermediate hops
+//! do not see the inner payload.
 //! Length and timing still leak. No mixing, no SURBs, no GPA claim.
 
 use std::io;

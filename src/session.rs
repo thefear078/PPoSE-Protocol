@@ -9,12 +9,30 @@ use rand_core::{OsRng, RngCore};
 use crate::cover::CoverMode;
 use crate::crypto::keys::{IdentitySecret, PublicIdentity};
 use crate::crypto::noise::{HandshakeRole, NoiseError, NoiseSession};
-use crate::network::forward::{decode_forward_body, encode_forward_body};
+use crate::network::forward::{decode_forward_body, encode_forward_body, FORWARD_BODY_OVERHEAD};
 use crate::network::packet::{decode_outer, encode_datagram, PacketError, PacketType};
 use crate::network::udp::recv_raw;
-use crate::onion::{wrap_route, OnionHop};
-use crate::reliability::{Arq, ArqError, ArqGiveUp};
-use crate::MAX_DATAGRAM;
+use crate::onion::{wrap_route, OnionHop, LAYER_OVERHEAD};
+use crate::reliability::{Arq, ArqError, ArqGiveUp, DATA_HDR_LEN, MAX_PAYLOAD};
+use crate::{MAX_DATAGRAM, OUTER_HEADER_LEN};
+
+/// AEAD tag length of the Noise cipher pinned in `NOISE_PARAMS` (ChaChaPoly).
+const NOISE_TAG_LEN: usize = 16;
+
+/// Largest ARQ fragment payload whose sealed DATA frame still fits
+/// `MAX_DATAGRAM` once wrapped for this path: the relay path adds a Forward
+/// envelope, and each onion hop adds a PND layer plus a fresh outer header.
+/// `MAX_PAYLOAD` alone only fits the direct, relay, and single-hop paths.
+/// Returns `0` when not even an empty fragment fits (too many hops).
+fn max_fragment_for_path(via_relay: bool, onion_hops: usize) -> usize {
+    let sealed = OUTER_HEADER_LEN + DATA_HDR_LEN + NOISE_TAG_LEN;
+    let path = if via_relay {
+        OUTER_HEADER_LEN + FORWARD_BODY_OVERHEAD
+    } else {
+        onion_hops * (LAYER_OVERHEAD + OUTER_HEADER_LEN)
+    };
+    MAX_DATAGRAM.saturating_sub(sealed + path).min(MAX_PAYLOAD)
+}
 
 /// How packets reach the other endpoint.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,6 +185,7 @@ impl UdpSession {
             cover: CoverMode::Off,
             next_cover_at: Instant::now(),
         };
+        sess.fit_fragments_to_path();
 
         let mut buf = [0u8; MAX_DATAGRAM];
         let mut tmp = [0u8; MAX_DATAGRAM];
@@ -261,6 +280,7 @@ impl UdpSession {
             cover: CoverMode::Off,
             next_cover_at: Instant::now(),
         };
+        sess.fit_fragments_to_path();
         if let Some((hops, dest)) = outbound_onion {
             sess.set_outbound_onion(hops, dest)?;
         }
@@ -294,7 +314,16 @@ impl UdpSession {
         self.peer = dest;
         self.onion = Some(hops);
         self.via_relay = false;
+        self.fit_fragments_to_path();
         Ok(())
+    }
+
+    /// Shrink outgoing ARQ fragments so every sealed DATA frame fits
+    /// `MAX_DATAGRAM` on the current path (see `max_fragment_for_path`).
+    fn fit_fragments_to_path(&mut self) {
+        let hops = self.onion.as_ref().map_or(0, Vec::len);
+        self.arq
+            .set_max_fragment(max_fragment_for_path(self.via_relay, hops));
     }
 
     /// Enable cover datagrams on idle.
@@ -407,7 +436,14 @@ impl UdpSession {
             return Ok(());
         }
         self.next_cover_at = self.schedule_next_cover(now);
+        // Never larger than the biggest real sealed DATA body on this path:
+        // bigger would both fail to fit a long onion path (an error here
+        // would abort the session, not just skip one cover packet) and be
+        // a size no real packet on this path could have.
+        let largest_real = DATA_HDR_LEN + NOISE_TAG_LEN + self.arq.max_fragment();
         let (min, max) = self.cover.payload_len_range();
+        let max = max.min(largest_real);
+        let min = min.min(max);
         let n = if max > min {
             min + (OsRng.next_u32() as usize % (max - min))
         } else {
@@ -528,5 +564,73 @@ fn decode_incoming(
         Ok((ity, ibody.to_vec(), Some(other)))
     } else {
         Ok((ty, body.to_vec(), None))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reliability::encode_data;
+
+    fn transport_session() -> NoiseSession {
+        let mut a =
+            NoiseSession::new(HandshakeRole::Initiator, &IdentitySecret::generate()).unwrap();
+        let mut b =
+            NoiseSession::new(HandshakeRole::Responder, &IdentitySecret::generate()).unwrap();
+        let (mut buf, mut tmp) = ([0u8; 1024], [0u8; 1024]);
+        let n = a.write_handshake(&[], &mut buf).unwrap();
+        b.read_handshake(&buf[..n], &mut tmp).unwrap();
+        let n = b.write_handshake(&[], &mut buf).unwrap();
+        a.read_handshake(&buf[..n], &mut tmp).unwrap();
+        let n = a.write_handshake(&[], &mut buf).unwrap();
+        b.read_handshake(&buf[..n], &mut tmp).unwrap();
+        a
+    }
+
+    /// Seal a DATA fragment of `chunk` bytes exactly as `seal_data` does
+    /// and wrap it for `hops` onion hops exactly as `send_inner` does.
+    fn fits(noise: &mut NoiseSession, hops: &[OnionHop], chunk: usize) -> bool {
+        let inner = encode_data(0, 1, 0, 2, &vec![0u8; chunk]);
+        let mut sealed = vec![0u8; inner.len() + NOISE_TAG_LEN];
+        let n = noise.seal(&inner, &mut sealed).unwrap();
+        let Ok(dg) = encode_datagram(PacketType::Data, &sealed[..n]) else {
+            return false;
+        };
+        hops.is_empty() || wrap_route(hops, "127.0.0.1:9".parse().unwrap(), &dg).is_ok()
+    }
+
+    #[test]
+    fn fragment_cap_is_exact_for_onion_paths() {
+        let mut noise = transport_session();
+        let hop = |port| OnionHop {
+            addr: format!("127.0.0.1:{port}").parse().unwrap(),
+            pk: IdentitySecret::generate().public(),
+        };
+        for n_hops in 0..=4 {
+            let hops: Vec<OnionHop> = (0..n_hops).map(|i| hop(9000 + i)).collect();
+            let max = max_fragment_for_path(false, n_hops as usize);
+            assert!(
+                fits(&mut noise, &hops, max),
+                "{n_hops} hops: {max} B must fit"
+            );
+            if max < MAX_PAYLOAD {
+                // MTU-bound, not MAX_PAYLOAD-bound: one byte more must not fit,
+                // otherwise the formula is needlessly conservative.
+                assert!(
+                    !fits(&mut noise, &hops, max + 1),
+                    "{n_hops} hops: cap not tight"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fragment_cap_values() {
+        assert_eq!(max_fragment_for_path(false, 0), MAX_PAYLOAD);
+        assert_eq!(max_fragment_for_path(true, 0), MAX_PAYLOAD);
+        assert_eq!(max_fragment_for_path(false, 1), MAX_PAYLOAD);
+        assert_eq!(max_fragment_for_path(false, 2), 995);
+        assert_eq!(max_fragment_for_path(false, 3), 909);
+        assert_eq!(max_fragment_for_path(false, 14), 0);
     }
 }

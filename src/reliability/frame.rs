@@ -5,7 +5,9 @@ use thiserror::Error;
 /// Maximum application bytes per DATA fragment.
 ///
 /// Sized so that `outer(8) + forward(6) + noise_tag(16) + DATA_HDR + payload`
-/// stays under [`crate::MAX_DATAGRAM`].
+/// stays under [`crate::MAX_DATAGRAM`] on the direct, relay, and single-hop
+/// paths. Multi-hop onion paths add 86 bytes per hop, so the session caps
+/// fragments lower there (`Arq::set_max_fragment`).
 pub const MAX_PAYLOAD: usize = 1024;
 
 /// DATA inner header: kind(1) + seq(4) + frag_id(2) + index(1) + total(1).

@@ -28,7 +28,7 @@ const MAX_PENDING_FRAGMENTS: usize = 64;
 /// ARQ errors.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ArqError {
-    /// Application message exceeds `MAX_PAYLOAD * 255`.
+    /// Application message exceeds 255 fragments of `max_fragment` bytes.
     #[error("message too large to fragment")]
     TooLarge,
     /// Inner frame codec.
@@ -69,6 +69,7 @@ pub struct Arq {
     pending_ack: bool,
     max_attempts: u8,
     retx: Duration,
+    max_fragment: usize,
 }
 
 impl Default for Arq {
@@ -92,7 +93,22 @@ impl Arq {
             pending_ack: false,
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             retx: DEFAULT_RETX,
+            max_fragment: MAX_PAYLOAD,
         }
+    }
+
+    /// Cap outgoing fragment payloads at `n` bytes (clamped to
+    /// `1..=MAX_PAYLOAD`). Paths that add per-packet overhead — onion hops
+    /// especially — need smaller fragments so each sealed, wrapped DATA
+    /// frame still fits `MAX_DATAGRAM`. Only affects this side's sending;
+    /// the receiver reassembles fragments of any size.
+    pub fn set_max_fragment(&mut self, n: usize) {
+        self.max_fragment = n.clamp(1, MAX_PAYLOAD);
+    }
+
+    /// Current outgoing fragment payload cap.
+    pub fn max_fragment(&self) -> usize {
+        self.max_fragment
     }
 
     /// Queue an application message (fragmented if needed).
@@ -106,7 +122,7 @@ impl Arq {
             self.enqueue_one(message)?;
             return Ok(());
         }
-        let chunks: Vec<&[u8]> = message.chunks(MAX_PAYLOAD).collect();
+        let chunks: Vec<&[u8]> = message.chunks(self.max_fragment).collect();
         if chunks.len() > 255 {
             return Err(ArqError::TooLarge);
         }
