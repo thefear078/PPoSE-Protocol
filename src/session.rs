@@ -397,6 +397,14 @@ impl UdpSession {
         Ok(self.noise.remote_static()?)
     }
 
+    /// Fail unless the authenticated remote static key is `expected` — the
+    /// same constant-time check the `_pinned` constructors run, for callers
+    /// that pin after accepting (`accept_responder_onion` has no pinned
+    /// variant). Call it before exchanging any application data.
+    pub fn pin_remote(&self, expected: &PublicIdentity) -> Result<(), SessionError> {
+        Ok(self.noise.pin_remote(&expected.as_bytes())?)
+    }
+
     fn wait_acked(&mut self, timeout: Duration) -> Result<(), SessionError> {
         let deadline = Instant::now() + timeout;
         loop {

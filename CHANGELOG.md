@@ -25,11 +25,16 @@ Wire format unchanged (`VER` stays `0x03`); v0.4 and v0.5 peers interoperate.
 - `examples/cover_measurement.rs`: measures real ACK/DATA/cover wire sizes against the project's actual encoding + a live Noise session — replaces the "unmeasured" size claim in `docs/SPECIFICATION.md` §8 with real numbers
 - `tests/cover.rs`: first test coverage at all for `CoverMode`/`set_cover` — a real message still delivers with cover traffic interleaved (`snow` only advances its receive nonce on successful decrypt, so unsealed cover packets can't desync the session)
 - `tests/malformed_input.rs`: deterministic seeded randomized-input coverage (not real coverage-guided fuzzing) for every function that parses bytes straight off the wire — `decode_outer`, `decode_inner`, `decode_forward_body`, `peel_layer`, `Invitation::decode`, `InviteVerifyingKey::from_bytes`, `rendezvous::decode_reply` — across every length 0..=200 bytes
+- CLI: `connect`/`listen` can now use every transport the library implements. Before, the CLI could *run* a relay, an onion hop, and a rendezvous server, but `connect`/`listen` only spoke the direct path. New flags: `--via-relay`, `--hop` (connect) / `--return-hop` + `--return-dest` (listen), `--rs` + `--psk` (listen registers itself; connect looks the peer up instead of naming it), `--cover off|balanced|stealth`, `--bind`, `--msg`. `onion-relay --key` keeps a hop's identity across restarts, and it prints a ready-to-paste `hop ADDR=KEY` line.
+- `tests/cli.rs`: end-to-end tests of the real `ppose` binary — direct, relay, two onion hops with a multi-fragment message, rendezvous, cover, timeout on a silent peer, and argument errors
+- `UdpSession::pin_remote` so a session accepted without a `_pinned` constructor (`accept_responder_onion`) can still be pinned before any data flows
 - `Arq::set_max_fragment` / `Arq::max_fragment` for path-dependent fragment sizing
 - Dependencies: `ed25519-dalek` (invitation signatures), `subtle` (constant-time compare; already present transitively)
 
 ### Fixed
 
+- `ppose connect`, `rs-register`, and `rs-lookup` bound their socket to `127.0.0.1`, so they could only ever reach peers on the same machine. They now bind the unspecified address of the target's family (or `--bind`), with a 5 s handshake timeout so an unreachable peer fails instead of hanging.
+- CLI hex arguments with non-ASCII characters panicked (byte-offset slicing inside a multi-byte character); misspelled flags were silently ignored or taken as an address. Both are now clean errors.
 - Onion paths with 2+ hops couldn't carry any message over ~995 bytes: ARQ always cut 1024-byte fragments, and each hop adds 86 bytes on the wire (78-byte layer + fresh 8-byte outer header), so `send` failed with `Packet(TooLarge)`. The session now sizes fragments per path (`max_fragment_for_path`: 995 B at 2 hops, 909 B at 3, …), and cover packets are capped to the largest real DATA size on the path. Receivers reassemble any fragment size, so this interoperates with v0.4 peers. Caught by a new multi-fragment test in `tests/onion_path.rs`; the existing test only sent 8 bytes.
 - `RendezvousService` (`src/rendezvous.rs`) had no cap on registered tokens and ran a full `O(n)` TTL sweep on every packet — reachable by any unauthenticated sender. Now capped (4096, FIFO eviction), sweep throttled, lookups check their own entry's freshness. Finding #6, the most severe of the review.
 - `Arq`'s fragment-reassembly table (`src/reliability/arq.rs`) had no cap on distinct in-progress `frag_id`s; an already-authenticated peer could grow it unboundedly by never completing any fragment. `MAX_PENDING_FRAGMENTS` (64) + FIFO eviction now bounds it. Finding #5.
@@ -42,6 +47,7 @@ Wire format unchanged (`VER` stays `0x03`); v0.4 and v0.5 peers interoperate.
 
 ### Changed
 
+- CLI rendezvous tokens rotate hourly (`token_from_psk(psk, unix_hours)`, as `src/rendezvous.rs` already recommended) instead of using a constant epoch `0`; lookups also try the previous hour. A v0.4 `rs-register` won't be found by a v0.5 `rs-lookup`.
 - Cleaned up several clippy-pedantic nits (`let...else`, redundant `continue`, hex-encoding helpers) with no behavior change
 - `docs/SPECIFICATION.md` architecture diagram, crypto primitives table, §4.5 onion heading, prior-art table, and limitations table updated — several had gone stale since v0.4 shipped onion/rendezvous/cover (still said "not implemented")
 

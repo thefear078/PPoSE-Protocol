@@ -283,6 +283,7 @@ fiction** and revoked — nothing in this project measures power draw.
 | Real message survives interleaved cover traffic | yes |
 | Replay cache, reassembly table, rendezvous table stay bounded | yes |
 | Every wire parser: randomized input of every length 0–200 B, no panic | yes |
+| `ppose` binary end to end: direct, relay, two onion hops, rendezvous, cover | yes |
 
 ---
 

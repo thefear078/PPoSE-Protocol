@@ -1,7 +1,8 @@
 //! Command-line entry.
 
 use std::env;
-use std::net::UdpSocket;
+use std::error::Error;
+use std::net::{SocketAddr, UdpSocket};
 use std::process;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -11,16 +12,18 @@ use ppose::admission::Invitation;
 use ppose::admission::InviteSigningKey;
 use ppose::admission::InviteVerifyingKey;
 use ppose::admission::TrustStore;
+use ppose::cover::CoverMode;
 use ppose::crypto::keys::IdentitySecret;
 use ppose::crypto::keys::PublicIdentity;
-use ppose::network::udp::bind_loopback;
-use ppose::onion::OnionRelay;
+use ppose::onion::{OnionHop, OnionRelay};
 use ppose::relay::Relay;
 use ppose::rendezvous::{
     decode_reply, encode_lookup, encode_register, token_from_psk, RendezvousService,
 };
 use ppose::session::{Path, UdpSession};
 use ppose::CRATE_VERSION;
+
+type CliResult<T> = Result<T, Box<dyn Error>>;
 
 fn main() {
     if let Err(e) = run() {
@@ -29,9 +32,10 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run() -> CliResult<()> {
     let mut args = env::args().skip(1);
     let cmd = args.next().unwrap_or_else(|| "help".into());
+    let mut rest: Vec<String> = args.collect();
     match cmd.as_str() {
         "help" | "-h" | "--help" => {
             print_help();
@@ -54,108 +58,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("public  {}", hex(&sk.public().as_bytes()));
             Ok(())
         }
-        "invite" => {
-            let mut rest: Vec<String> = args.collect();
-            let ttl = take_flag(&mut rest, "--ttl-secs")?
-                .map(|v| v.parse::<u64>())
-                .transpose()
-                .map_err(|_| "--ttl-secs must be a number")?
-                .unwrap_or(86_400);
-            let signer_hex = take_flag(&mut rest, "--signer")?
-                .ok_or("invite requires --signer <hex32 keygen-invite secret>")?;
-            if rest.is_empty() {
-                return Err(
-                    "usage: ppose invite <subject hex32> --signer <hex32> [--ttl-secs N]".into(),
-                );
-            }
-            let subject = PublicIdentity::from_bytes(parse_hex32(&rest.remove(0))?);
-            let signer = InviteSigningKey::from_bytes(parse_hex32(&signer_hex)?);
-            let now = unix_now();
-            let invite = signer.issue(&subject, now, ttl);
-            println!("root     {}", hex(&signer.public().as_bytes()));
-            println!("subject  {}", hex(&subject.as_bytes()));
-            println!("issued   {now}");
-            println!("expires  {}", now + ttl);
-            println!("invite   {}", hex(&invite.encode()));
-            Ok(())
-        }
-        "listen" => {
-            let mut rest: Vec<String> = args.collect();
-            let pin = take_pin_flag(&mut rest, "--pin")?;
-            let id = take_key_flag(&mut rest, "--key")?.unwrap_or_else(IdentitySecret::generate);
-            let admit_roots = take_all_flag(&mut rest, "--admit-root");
-            let admit_invites = take_all_flag(&mut rest, "--admit-invite");
-            let admit_depth: u8 = take_flag(&mut rest, "--admit-depth")?
-                .map(|v| v.parse())
-                .transpose()
-                .map_err(|_| "--admit-depth must be a number")?
-                .unwrap_or(0);
-            let bind = if rest.is_empty() {
-                "127.0.0.1:0".to_string()
-            } else {
-                rest.remove(0)
-            };
-            let sock = UdpSocket::bind(&bind)?;
-            sock.set_read_timeout(Some(Duration::from_secs(30)))?;
-            println!("listen {}", sock.local_addr()?);
-            println!("fp {}", hex(&id.public().fingerprint()));
-            if pin.is_some() {
-                println!("pin   expecting pinned remote static key");
-            }
-            let mut s = UdpSession::accept_responder_pinned(sock, &id, None, pin)?;
-            if !admit_roots.is_empty() {
-                let mut store = TrustStore::new();
-                for r in &admit_roots {
-                    store.add_root(InviteVerifyingKey::from_bytes(parse_hex32(r)?)?);
-                }
-                let now = unix_now();
-                for inv in &admit_invites {
-                    store.ingest(Invitation::decode(&parse_hex(inv)?)?, now)?;
-                }
-                let remote = s.remote_static()?;
-                if !store.is_admitted(&remote, admit_depth, now) {
-                    let reason = format!(
-                        "rejected: identity {} not admitted (Web-of-Trust gate, depth {admit_depth})",
-                        hex(&remote)
-                    );
-                    // The handshake already completed, so we have a working
-                    // authenticated channel — use it to tell the peer why,
-                    // instead of just dropping the connection and leaving
-                    // them with a bare OS-level reset. Best-effort: if this
-                    // send also fails, the operator's own error below still
-                    // explains what happened on this end.
-                    let _ = s.send(reason.as_bytes());
-                    return Err(reason.into());
-                }
-                println!("admit remote identity is admitted");
-            }
-            let msg = s.recv(Duration::from_secs(30))?;
-            println!("recv {}", String::from_utf8_lossy(&msg));
-            s.send(b"ack")?;
-            Ok(())
-        }
-        "connect" => {
-            let mut rest: Vec<String> = args.collect();
-            let pin = take_pin_flag(&mut rest, "--pin")?;
-            let id = take_key_flag(&mut rest, "--key")?.unwrap_or_else(IdentitySecret::generate);
-            if rest.is_empty() {
-                return Err("usage: ppose connect <peer> [--pin <hex32>] [--key <hex32>]".into());
-            }
-            let peer: std::net::SocketAddr = rest.remove(0).parse()?;
-            let (sock, addr) = bind_loopback()?;
-            println!("local {addr}");
-            if pin.is_some() {
-                println!("pin   expecting pinned remote static key");
-            }
-            let mut s =
-                UdpSession::connect_initiator_pinned(sock, &id, Path::Direct { peer }, pin)?;
-            s.send(b"hello")?;
-            let reply = s.recv(Duration::from_secs(10))?;
-            println!("recv {}", String::from_utf8_lossy(&reply));
-            Ok(())
-        }
+        "invite" => invite(&mut rest),
+        "listen" => listen(&mut rest),
+        "connect" => connect(&mut rest),
         "relay" => {
-            let bind = args.next().unwrap_or_else(|| "127.0.0.1:0".into());
+            let bind = positional_or(&mut rest, "127.0.0.1:0")?;
+            no_leftovers(&rest)?;
             let mut r = Relay::bind(&bind)?;
             println!("relay {}", r.local_addr()?);
             loop {
@@ -163,17 +71,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         "onion-relay" => {
-            let bind = args.next().unwrap_or_else(|| "127.0.0.1:0".into());
-            let id = IdentitySecret::generate();
+            let id = take_key_flag(&mut rest, "--key")?.unwrap_or_else(IdentitySecret::generate);
+            let bind = positional_or(&mut rest, "127.0.0.1:0")?;
+            no_leftovers(&rest)?;
             let mut r = OnionRelay::bind(&bind, id)?;
-            println!("onion-relay {}", r.local_addr()?);
-            println!("public {}", hex(&r.public().as_bytes()));
+            let addr = r.local_addr()?;
+            let public = hex(&r.public().as_bytes());
+            println!("onion-relay {addr}");
+            println!("public {public}");
+            println!("hop {addr}={public}");
             loop {
                 r.step()?;
             }
         }
         "rs" => {
-            let bind = args.next().unwrap_or_else(|| "127.0.0.1:0".into());
+            let bind = positional_or(&mut rest, "127.0.0.1:0")?;
+            no_leftovers(&rest)?;
             let mut r = RendezvousService::bind(&bind)?;
             println!("rendezvous {}", r.local_addr()?);
             loop {
@@ -181,25 +94,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         "rs-register" => {
-            let rs: std::net::SocketAddr = args.next().ok_or("rs-register <rs> <psk>")?.parse()?;
-            let psk = args.next().unwrap_or_else(|| "demo".into());
-            let token = token_from_psk(psk.as_bytes(), 0);
-            let sock = UdpSocket::bind("127.0.0.1:0")?;
+            let rs: SocketAddr = positional(&mut rest, "usage: ppose rs-register <rs> [psk]")?;
+            let psk = positional_or(&mut rest, "demo")?;
+            no_leftovers(&rest)?;
+            let sock = bind_client(None, rs)?;
+            let token = token_from_psk(psk.as_bytes(), rs_epoch_now());
             sock.send_to(&encode_register(&token), rs)?;
             println!("registered token {}", hex(&token));
             println!("local {}", sock.local_addr()?);
             Ok(())
         }
         "rs-lookup" => {
-            let rs: std::net::SocketAddr = args.next().ok_or("rs-lookup <rs> <psk>")?.parse()?;
-            let psk = args.next().unwrap_or_else(|| "demo".into());
-            let token = token_from_psk(psk.as_bytes(), 0);
-            let sock = UdpSocket::bind("127.0.0.1:0")?;
-            sock.set_read_timeout(Some(Duration::from_secs(2)))?;
-            sock.send_to(&encode_lookup(&token), rs)?;
-            let mut buf = [0u8; 512];
-            let (n, _) = sock.recv_from(&mut buf)?;
-            match decode_reply(&buf[..n]) {
+            let rs: SocketAddr = positional(&mut rest, "usage: ppose rs-lookup <rs> [psk]")?;
+            let psk = positional_or(&mut rest, "demo")?;
+            no_leftovers(&rest)?;
+            let sock = bind_client(None, rs)?;
+            match rs_lookup(&sock, rs, &psk)? {
                 Some(addr) => println!("peer {addr}"),
                 None => println!("not found"),
             }
@@ -213,6 +123,169 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+fn invite(rest: &mut Vec<String>) -> CliResult<()> {
+    let ttl = take_flag(rest, "--ttl-secs")?
+        .map(|v| v.parse::<u64>())
+        .transpose()
+        .map_err(|_| "--ttl-secs must be a number")?
+        .unwrap_or(86_400);
+    let signer_hex = take_flag(rest, "--signer")?
+        .ok_or("invite requires --signer <hex32 keygen-invite secret>")?;
+    let subject_hex: String = positional(
+        rest,
+        "usage: ppose invite <subject hex32> --signer <hex32> [--ttl-secs N]",
+    )?;
+    no_leftovers(rest)?;
+    let subject = PublicIdentity::from_bytes(parse_hex32(&subject_hex)?);
+    let signer = InviteSigningKey::from_bytes(parse_hex32(&signer_hex)?);
+    let now = unix_now();
+    let invite = signer.issue(&subject, now, ttl);
+    println!("root     {}", hex(&signer.public().as_bytes()));
+    println!("subject  {}", hex(&subject.as_bytes()));
+    println!("issued   {now}");
+    println!("expires  {}", now + ttl);
+    println!("invite   {}", hex(&invite.encode()));
+    Ok(())
+}
+
+fn listen(rest: &mut Vec<String>) -> CliResult<()> {
+    let pin = take_pin_flag(rest, "--pin")?;
+    let id = take_key_flag(rest, "--key")?.unwrap_or_else(IdentitySecret::generate);
+    let admit_roots = take_all_flag(rest, "--admit-root");
+    let admit_invites = take_all_flag(rest, "--admit-invite");
+    let admit_depth: u8 = take_flag(rest, "--admit-depth")?
+        .map(|v| v.parse())
+        .transpose()
+        .map_err(|_| "--admit-depth must be a number")?
+        .unwrap_or(0);
+    let via_relay = take_addr_flag(rest, "--via-relay")?;
+    let return_hops = take_hops(rest, "--return-hop")?;
+    let return_dest = take_addr_flag(rest, "--return-dest")?;
+    let rs = take_addr_flag(rest, "--rs")?;
+    let psk = take_flag(rest, "--psk")?.unwrap_or_else(|| "demo".into());
+    let cover = take_cover_flag(rest)?;
+    let bind = positional_or(rest, "127.0.0.1:0")?;
+    no_leftovers(rest)?;
+    if via_relay.is_some() && !return_hops.is_empty() {
+        return Err("--via-relay and --return-hop are mutually exclusive".into());
+    }
+    if return_dest.is_some() && return_hops.is_empty() {
+        return Err("--return-dest only applies together with --return-hop".into());
+    }
+
+    let sock = UdpSocket::bind(&bind)?;
+    sock.set_read_timeout(Some(Duration::from_secs(30)))?;
+    println!("listen {}", sock.local_addr()?);
+    println!("fp {}", hex(&id.public().fingerprint()));
+    if let Some(rs) = rs {
+        // Registered from the listening socket itself, so the address the
+        // rendezvous records is the one a peer can actually reach us on.
+        let token = token_from_psk(psk.as_bytes(), rs_epoch_now());
+        sock.send_to(&encode_register(&token), rs)?;
+        println!("rs    registered at {rs} (entry lives 60 s)");
+    }
+    if pin.is_some() {
+        println!("pin   expecting pinned remote static key");
+    }
+    let mut s = if return_hops.is_empty() {
+        UdpSession::accept_responder_pinned(sock, &id, via_relay, pin)?
+    } else {
+        // PND has no reply blocks: the responder must be told the return
+        // route and the connector's address up front.
+        let dest = return_dest.ok_or("--return-hop needs --return-dest <connector addr>")?;
+        let s = UdpSession::accept_responder_onion(sock, &id, return_hops, dest)?;
+        if let Some(expected) = &pin {
+            s.pin_remote(expected)?;
+        }
+        s
+    };
+    if !admit_roots.is_empty() {
+        let mut store = TrustStore::new();
+        for r in &admit_roots {
+            store.add_root(InviteVerifyingKey::from_bytes(parse_hex32(r)?)?);
+        }
+        let now = unix_now();
+        for inv in &admit_invites {
+            store.ingest(Invitation::decode(&parse_hex(inv)?)?, now)?;
+        }
+        let remote = s.remote_static()?;
+        if !store.is_admitted(&remote, admit_depth, now) {
+            let reason = format!(
+                "rejected: identity {} not admitted (Web-of-Trust gate, depth {admit_depth})",
+                hex(&remote)
+            );
+            // The handshake already completed, so there is a working
+            // authenticated channel — use it to tell the peer why instead of
+            // leaving them with a bare connection reset. Best-effort: if this
+            // send fails too, the error below still explains it on this end.
+            let _ = s.send(reason.as_bytes());
+            return Err(reason.into());
+        }
+        println!("admit remote identity is admitted");
+    }
+    s.set_cover(cover);
+    let msg = s.recv(Duration::from_secs(30))?;
+    println!("recv {}", String::from_utf8_lossy(&msg));
+    s.send(b"ack")?;
+    Ok(())
+}
+
+fn connect(rest: &mut Vec<String>) -> CliResult<()> {
+    const USAGE: &str = "usage: ppose connect <peer> [options]  (or --rs <addr> instead of <peer>)";
+    let pin = take_pin_flag(rest, "--pin")?;
+    let id = take_key_flag(rest, "--key")?.unwrap_or_else(IdentitySecret::generate);
+    let bind = take_flag(rest, "--bind")?;
+    let via_relay = take_addr_flag(rest, "--via-relay")?;
+    let hops = take_hops(rest, "--hop")?;
+    let rs = take_addr_flag(rest, "--rs")?;
+    let psk = take_flag(rest, "--psk")?.unwrap_or_else(|| "demo".into());
+    let cover = take_cover_flag(rest)?;
+    let msg = take_flag(rest, "--msg")?.unwrap_or_else(|| "hello".into());
+    let explicit_peer: Option<SocketAddr> = if rest.is_empty() {
+        None
+    } else {
+        Some(positional(rest, USAGE)?)
+    };
+    no_leftovers(rest)?;
+    if via_relay.is_some() && !hops.is_empty() {
+        return Err("--via-relay and --hop are mutually exclusive".into());
+    }
+
+    let first_contact = rs
+        .or(via_relay)
+        .or(hops.first().map(|h| h.addr))
+        .or(explicit_peer)
+        .ok_or(USAGE)?;
+    let sock = bind_client(bind.as_deref(), first_contact)?;
+    println!("local {}", sock.local_addr()?);
+    let peer = match (explicit_peer, rs) {
+        (Some(peer), _) => peer,
+        (None, Some(rs)) => {
+            let peer = rs_lookup(&sock, rs, &psk)?
+                .ok_or("peer not registered at the rendezvous (or its 60 s entry expired)")?;
+            println!("rs    found peer {peer}");
+            peer
+        }
+        (None, None) => return Err(USAGE.into()),
+    };
+    let path = if let Some(relay) = via_relay {
+        Path::ViaRelay { relay, peer }
+    } else if !hops.is_empty() {
+        Path::ViaOnion { hops, dest: peer }
+    } else {
+        Path::Direct { peer }
+    };
+    if pin.is_some() {
+        println!("pin   expecting pinned remote static key");
+    }
+    let mut s = UdpSession::connect_initiator_pinned(sock, &id, path, pin)?;
+    s.set_cover(cover);
+    s.send(msg.as_bytes())?;
+    let reply = s.recv(Duration::from_secs(10))?;
+    println!("recv {}", String::from_utf8_lossy(&reply));
+    Ok(())
+}
+
 fn print_help() {
     eprintln!(
         "ppose {CRATE_VERSION} — research prototype (not an anonymity network)\n\n\
@@ -220,44 +293,125 @@ fn print_help() {
            keygen\n\
            keygen-invite\n\
            invite <subject hex32> --signer <hex32> [--ttl-secs N]\n\
-           listen [bind] [--pin <hex32>] [--key <hex32>]\n\
-             [--admit-root <hex32>]... [--admit-invite <hex288>]... [--admit-depth N]\n\
-           connect <peer> [--pin <hex32>] [--key <hex32>]\n\
-           relay [bind]              cleartext dest forwarder\n\
-           onion-relay [bind]        PND hop (not Sphinx)\n\
-           rs [bind]                 token rendezvous\n\
-           rs-register <rs> [psk]\n\
+           listen [bind] [--key H] [--pin H] [--cover MODE]\n\
+             [--via-relay ADDR | --return-hop ADDR=H... --return-dest ADDR]\n\
+             [--rs ADDR [--psk PSK]]\n\
+             [--admit-root H]... [--admit-invite H288]... [--admit-depth N]\n\
+           connect <peer> [--key H] [--pin H] [--cover MODE] [--bind ADDR]\n\
+             [--via-relay ADDR | --hop ADDR=H...] [--msg TEXT]\n\
+           connect --rs ADDR [--psk PSK] [...same options]\n\
+           relay [bind]                   cleartext dest forwarder\n\
+           onion-relay [bind] [--key H]   PND hop (not Sphinx)\n\
+           rs [bind]                      token rendezvous\n\
+           rs-register <rs> [psk]         register a throwaway socket (server test)\n\
            rs-lookup <rs> [psk]\n\
            version\n\n\
-         --pin pins the expected remote Noise static public key (64 hex\n\
-         chars, from the peer's `keygen` \"public\" line) so the handshake\n\
-         fails closed on an unexpected key instead of trust-on-first-use.\n\
-         --key loads a persistent local identity (64 hex chars, from this\n\
-         node's own `keygen` \"secret\" line) instead of a fresh random one\n\
-         each run — needed so a peer's --pin stays valid across restarts.\n\n\
-         Admission (Invitation Web-of-Trust, src/admission.rs — a local\n\
-         policy gate, NOT a Sybil defense; see docs/SECURITY_REVIEW.md):\n\
-         --admit-root registers a trusted `keygen-invite` public key\n\
-         (repeatable). With no --admit-root given, listen accepts anyone,\n\
-         same as before. --admit-invite loads an `invite`-command output\n\
-         (repeatable) so chains longer than --admit-depth 0 can resolve.\n\
-         A connecting peer whose Noise static identity isn't reachable\n\
-         from a trusted root within --admit-depth hops is rejected after\n\
-         the handshake completes (their identity is already authenticated\n\
-         at that point — this only decides admission, not authenticity).\n"
+         H is 64 hex chars (32 bytes). ADDR is ip:port.\n\n\
+         --key loads a persistent identity (a `keygen` \"secret\") instead of a\n\
+         fresh random one each run — needed so a peer's --pin keeps working.\n\
+         --pin requires the peer's Noise static key (their `keygen` \"public\"),\n\
+         failing closed instead of trust-on-first-use.\n\
+         --cover off|balanced|stealth sends idle cover datagrams (unmeasured\n\
+         against real traffic; see docs/SPECIFICATION.md §8).\n\
+         --bind sets connect's local address; by default it binds 0.0.0.0:0\n\
+         so the OS picks a real route.\n\n\
+         Paths (all relays see addresses; none of this is anonymous):\n\
+         --via-relay ADDR goes through a `relay`; the listener passes the same\n\
+         relay address so it only accepts traffic from it.\n\
+         --hop ADDR=H (repeat, in order) goes through `onion-relay` hops; each\n\
+         prints its own ready-to-paste `hop` line. PND has no reply blocks, so\n\
+         the listener needs the reverse route (--return-hop, last hop first)\n\
+         and the connector's address (--return-dest; pin it with --bind).\n\
+         --rs ADDR registers the listener at a rendezvous under --psk (default\n\
+         \"demo\"), and lets connect look the peer up instead of naming it.\n\
+         The token rotates hourly; connect also tries the previous hour.\n\n\
+         Admission (Invitation Web-of-Trust — a local policy gate, NOT a Sybil\n\
+         defense): --admit-root trusts a `keygen-invite` public key; with none\n\
+         given, listen accepts anyone. --admit-invite loads `invite` output so\n\
+         chains up to --admit-depth hops resolve. Checked after the handshake,\n\
+         on the peer's authenticated identity; rejected peers are told why.\n"
     );
+}
+
+/// Bind a client socket that can reach `target`: `--bind` if given, else an
+/// ephemeral port on the unspecified address of `target`'s family so the OS
+/// picks a real route (a loopback-bound socket can only reach localhost).
+/// The read timeout bounds the handshake against a silent peer.
+fn bind_client(explicit: Option<&str>, target: SocketAddr) -> CliResult<UdpSocket> {
+    let bind = match explicit {
+        Some(b) => b,
+        None if target.is_ipv6() => "[::]:0",
+        None => "0.0.0.0:0",
+    };
+    let sock = UdpSocket::bind(bind)?;
+    sock.set_read_timeout(Some(Duration::from_secs(5)))?;
+    Ok(sock)
+}
+
+fn rs_epoch_now() -> u64 {
+    unix_now() / 3600
+}
+
+/// Look `psk`'s token up at `rs` for this hour, then the previous one — a
+/// registration made just before the hour turned stays live for up to its
+/// 60 s TTL.
+fn rs_lookup(sock: &UdpSocket, rs: SocketAddr, psk: &str) -> CliResult<Option<SocketAddr>> {
+    let epoch = rs_epoch_now();
+    for e in [epoch, epoch.saturating_sub(1)] {
+        sock.send_to(&encode_lookup(&token_from_psk(psk.as_bytes(), e)), rs)?;
+        let mut buf = [0u8; 512];
+        for _ in 0..8 {
+            let (n, from) = sock.recv_from(&mut buf)?;
+            if from != rs {
+                continue;
+            }
+            if let Some(addr) = decode_reply(&buf[..n]) {
+                return Ok(Some(addr));
+            }
+            break;
+        }
+    }
+    Ok(None)
+}
+
+/// `ADDR=H`, exactly the `hop` line `onion-relay` prints.
+fn parse_hop(s: &str) -> CliResult<OnionHop> {
+    let (addr, pk) = s
+        .split_once('=')
+        .ok_or_else(|| format!("hop must be <ip:port>=<public hex32>, got {s}"))?;
+    Ok(OnionHop {
+        addr: addr.parse()?,
+        pk: PublicIdentity::from_bytes(parse_hex32(pk)?),
+    })
+}
+
+fn take_hops(args: &mut Vec<String>, flag: &str) -> CliResult<Vec<OnionHop>> {
+    take_all_flag(args, flag)
+        .iter()
+        .map(|h| parse_hop(h))
+        .collect()
+}
+
+fn take_cover_flag(args: &mut Vec<String>) -> CliResult<CoverMode> {
+    match take_flag(args, "--cover")?.as_deref() {
+        None | Some("off") => Ok(CoverMode::Off),
+        Some("balanced") => Ok(CoverMode::Balanced),
+        Some("stealth") => Ok(CoverMode::Stealth),
+        Some(other) => {
+            Err(format!("--cover must be off, balanced, or stealth; got {other}").into())
+        }
+    }
+}
+
+fn take_addr_flag(args: &mut Vec<String>, flag: &str) -> CliResult<Option<SocketAddr>> {
+    take_flag(args, flag)?
+        .map(|v| v.parse().map_err(|e| format!("{flag} {v}: {e}").into()))
+        .transpose()
 }
 
 /// Remove a `--pin <hex32>` flag from `args` (if present) and parse it into
 /// the identity a peer must present at handshake time.
-///
-/// # Errors
-/// Returns an error if the flag is given without a value or the value is
-/// not 64 hex characters encoding 32 bytes.
-fn take_pin_flag(
-    args: &mut Vec<String>,
-    flag: &str,
-) -> Result<Option<PublicIdentity>, Box<dyn std::error::Error>> {
+fn take_pin_flag(args: &mut Vec<String>, flag: &str) -> CliResult<Option<PublicIdentity>> {
     take_flag(args, flag)?
         .map(|v| parse_hex32(&v).map(PublicIdentity::from_bytes))
         .transpose()
@@ -265,23 +419,13 @@ fn take_pin_flag(
 
 /// Remove a `--key <hex32>` flag from `args` (if present) and parse it into
 /// a persistent local identity secret.
-///
-/// # Errors
-/// Returns an error if the flag is given without a value or the value is
-/// not 64 hex characters encoding 32 bytes.
-fn take_key_flag(
-    args: &mut Vec<String>,
-    flag: &str,
-) -> Result<Option<IdentitySecret>, Box<dyn std::error::Error>> {
+fn take_key_flag(args: &mut Vec<String>, flag: &str) -> CliResult<Option<IdentitySecret>> {
     take_flag(args, flag)?
         .map(|v| parse_hex32(&v).map(IdentitySecret::from_bytes))
         .transpose()
 }
 
-fn take_flag(
-    args: &mut Vec<String>,
-    flag: &str,
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
+fn take_flag(args: &mut Vec<String>, flag: &str) -> CliResult<Option<String>> {
     let Some(pos) = args.iter().position(|a| a == flag) else {
         return Ok(None);
     };
@@ -292,11 +436,8 @@ fn take_flag(
     Ok(Some(args.remove(pos)))
 }
 
-/// Remove every `flag <value>` pair from `args`, in the order encountered.
-/// Unlike [`take_flag`] this never errors: a trailing `flag` with no value
-/// is simply left in `args` for the caller's own "unexpected argument"
-/// handling (none of the current commands have one, so it's effectively
-/// ignored — acceptable for this CLI's scope).
+/// Remove every `flag <value>` pair from `args`, in the order encountered. A
+/// trailing `flag` with no value is left in place for [`no_leftovers`].
 fn take_all_flag(args: &mut Vec<String>, flag: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -311,14 +452,47 @@ fn take_all_flag(args: &mut Vec<String>, flag: &str) -> Vec<String> {
     out
 }
 
-fn parse_hex32(s: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+/// Take the next positional argument (call after all flags are taken).
+fn positional<T: std::str::FromStr>(args: &mut Vec<String>, usage: &str) -> CliResult<T>
+where
+    T::Err: Error + 'static,
+{
+    if args.is_empty() {
+        return Err(usage.into());
+    }
+    Ok(args.remove(0).parse()?)
+}
+
+fn positional_or(args: &mut Vec<String>, default: &str) -> CliResult<String> {
+    if args.is_empty() {
+        Ok(default.to_string())
+    } else {
+        Ok(args.remove(0))
+    }
+}
+
+/// Reject anything not consumed — a misspelled flag would otherwise be
+/// silently ignored or mistaken for an address.
+fn no_leftovers(args: &[String]) -> CliResult<()> {
+    match args.first() {
+        None => Ok(()),
+        Some(extra) => Err(format!("unexpected argument {extra}").into()),
+    }
+}
+
+fn parse_hex32(s: &str) -> CliResult<[u8; 32]> {
     let bytes = parse_hex(s)?;
     bytes
         .try_into()
         .map_err(|v: Vec<u8>| format!("expected 32 bytes (64 hex chars), got {}", v.len()).into())
 }
 
-fn parse_hex(s: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn parse_hex(s: &str) -> CliResult<Vec<u8>> {
+    // Validate first: slicing a string with non-ASCII characters at byte
+    // offsets would panic instead of reporting a bad argument.
+    if !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("expected only hex characters (0-9, a-f)".into());
+    }
     if s.len() % 2 != 0 {
         return Err(format!("expected an even number of hex chars, got {}", s.len()).into());
     }

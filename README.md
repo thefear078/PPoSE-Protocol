@@ -63,45 +63,61 @@ If you need production anonymity, use battle-tested systems (Tor, I2P, Nym, Simp
 X25519 identity
     → Noise XX handshake
     → inner DATA/ACK frames
-    → selective-repeat ARQ + fragments
+    → selective-repeat ARQ + fragments (sized to fit the path)
     → 8-byte cleartext outer header
-    → UDP  (direct  or  via IPv4 forwarder)
+    → UDP  (direct, via IPv4 forwarder, or via PND onion hops)
 ```
 
 ```bash
 git clone https://github.com/thefear078/PPoSE-Protocol.git
 cd PPoSE-Protocol
 cargo test
-cargo run --example udp_chat
+cargo build --release          # binary: target/release/ppose
+alias ppose=target/release/ppose
+ppose help                     # every command and flag
 
-# two terminals
-cargo run --bin ppose -- listen 127.0.0.1:9000
-cargo run --bin ppose -- connect 127.0.0.1:9000
+# direct (listen on 0.0.0.0:9000 to accept from other machines)
+ppose listen 127.0.0.1:9000
+ppose connect 127.0.0.1:9000 --msg "hi"
 
 # pin the remote static key instead of trust-on-first-use
-cargo run --bin ppose -- keygen                              # note "secret" and "public"
-cargo run --bin ppose -- listen 127.0.0.1:9000 --key <secret hex>
-cargo run --bin ppose -- connect 127.0.0.1:9000 --pin <public hex>
+ppose keygen                                   # note "secret" and "public"
+ppose listen 127.0.0.1:9000 --key <secret hex>
+ppose connect 127.0.0.1:9000 --pin <public hex>
+
+# through a forwarder (it sees both addresses)
+ppose relay 127.0.0.1:8000
+ppose listen 127.0.0.1:9000 --via-relay 127.0.0.1:8000
+ppose connect 127.0.0.1:9000 --via-relay 127.0.0.1:8000
+
+# through two PND onion hops (not Sphinx; each hop sees the next address)
+ppose onion-relay 127.0.0.1:8001               # prints "hop 127.0.0.1:8001=<hex>"
+ppose onion-relay 127.0.0.1:8002
+ppose listen 127.0.0.1:9000 --return-hop <hop2> --return-hop <hop1> --return-dest 127.0.0.1:7000
+ppose connect 127.0.0.1:9000 --hop <hop1> --hop <hop2> --bind 127.0.0.1:7000
+
+# find the peer through a rendezvous instead of knowing its address
+ppose rs 127.0.0.1:8100
+ppose listen 127.0.0.1:9000 --rs 127.0.0.1:8100 --psk our-secret
+ppose connect --rs 127.0.0.1:8100 --psk our-secret
+
+# idle cover datagrams (any mode above)
+ppose connect 127.0.0.1:9000 --cover stealth
 
 # gate listen with Invitation Web-of-Trust admission (not a Sybil defense)
-cargo run --bin ppose -- keygen-invite                        # a trusted root
-cargo run --bin ppose -- keygen                               # the peer you'll vouch for
-cargo run --bin ppose -- invite <peer public hex> --signer <root secret hex>
-cargo run --bin ppose -- listen 127.0.0.1:9000 \
-  --admit-root <root public hex> --admit-invite <invite hex> --admit-depth 1
-cargo run --bin ppose -- connect 127.0.0.1:9000 --key <peer secret hex>
+ppose keygen-invite                            # a trusted root
+ppose keygen                                   # the peer you'll vouch for
+ppose invite <peer public hex> --signer <root secret hex>
+ppose listen 127.0.0.1:9000 --admit-root <root public hex> --admit-invite <invite hex> --admit-depth 1
+ppose connect 127.0.0.1:9000 --key <peer secret hex>
 
-# optional forwarder (sees destination addresses)
-cargo run --example relay_node -- 127.0.0.1:8000
-
-# invitation web-of-trust admission walkthrough
+# library walkthroughs
+cargo run --example udp_chat
 cargo run --example admission_demo
-
-# cover-traffic wire-size measurement (real vs cover packet sizes)
-cargo run --example cover_measurement
+cargo run --example cover_measurement         # real vs cover packet sizes
 ```
 
-Tests cover: handshake, key pinning, ARQ loss recovery, fragmentation, relay and two-hop onion paths (including multi-fragment messages), rendezvous, invitation web-of-trust, cover traffic, bounded state tables, and randomized malformed input for every wire parser. Full list: [SPECIFICATION.md §10](docs/SPECIFICATION.md#10-testing-requirements).
+Tests cover: handshake, key pinning, ARQ loss recovery, fragmentation, relay and two-hop onion paths (including multi-fragment messages), rendezvous, invitation web-of-trust, cover traffic, bounded state tables, randomized malformed input for every wire parser, and the `ppose` binary itself end to end in every transport mode. Full list: [SPECIFICATION.md §10](docs/SPECIFICATION.md#10-testing-requirements).
 
 ### Wire envelope (cleartext outer header = 8 bytes)
 

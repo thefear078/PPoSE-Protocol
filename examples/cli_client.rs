@@ -1,4 +1,5 @@
-//! Direct listen/connect demo (same as `ppose listen` / `ppose connect`).
+//! Minimal direct listen/connect over the library API, loopback only. The
+//! `ppose` binary is the full version (relay, onion, rendezvous, pinning).
 
 use std::env;
 use std::time::Duration;
